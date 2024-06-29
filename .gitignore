@@ -1,4 +1,4 @@
 build/
 a.out
-inc/wayland/
-src/wayland/
+inc/wayland/*
+src/wayland/*
