@@ -3,4 +3,4 @@ project('opengl-studies', 'c', 'cpp', default_options: ['c_std=c17', 'cpp_std=c+
 deps = [dependency('wayland-client'), dependency('wayland-egl'), dependency('egl'), dependency('spdlog')]
 inc = include_directories('inc')
 
-executable('offscreen', 'src/offscreen/offscreen.cpp', 'src/wayland/xdg-shell.c', include_directories: inc, dependencies: deps)
+executable('window', 'src/window/window.cpp', 'src/wayland/xdg-shell.c', include_directories: inc, dependencies: deps)
