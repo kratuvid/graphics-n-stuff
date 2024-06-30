@@ -1,6 +1,9 @@
-import <print>;
-import <string_view>;
-import <source_location>;
+#include <print>
+#include <string_view>
+#include <source_location>
+#include <exception>
+
+#include <spdlog/spdlog.h>
 
 #include <wayland-client.h>
 #include "wayland/xdg-shell.h"
@@ -9,6 +12,9 @@ import <source_location>;
 
 int main()
 {
+	spdlog::set_level(spdlog::level::debug);
+	spdlog::set_pattern("[%o] [%^%l%$] %v");
+
 	App app;
 	try
 	{
