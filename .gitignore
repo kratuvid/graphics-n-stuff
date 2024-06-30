@@ -1,4 +1,5 @@
 build/
+build_release/
 a.out
 inc/wayland/
 src/wayland/

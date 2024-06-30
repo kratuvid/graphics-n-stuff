@@ -1,4 +1,7 @@
 project('opengl-studies', 'c', 'cpp', default_options: ['c_std=c17', 'cpp_std=c++23'])
+if get_option('buildtype').startswith('debug')
+ add_project_arguments('-DDEBUG', language: 'cpp')
+endif
 
 deps = [dependency('wayland-client'), dependency('wayland-egl'), dependency('egl'), dependency('spdlog')]
 inc = include_directories('inc')

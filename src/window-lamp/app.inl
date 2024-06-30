@@ -1,5 +1,9 @@
+#ifdef DEBUG
 #define iassert(expr, ...) if (!(expr)) \
 		App::_iassert(#expr, std::source_location::current() __VA_OPT__(,) __VA_ARGS__);
+#else
+#define iassert(expr, ...) (expr);
+#endif
 
 class App
 {
@@ -163,21 +167,35 @@ private: /* section: private primary */
 		auto buffer = next_buffer();
 		iassert(buffer);
 
-		static const int radius = 100;
+		static constexpr int radius_outer = 120, radius_inner = 80;
+		static constexpr int diff_max = radius_outer * radius_outer - radius_inner * radius_inner;
 
 		memset(buffer->shm_data, 0x00, buffer->shm_size);
 
 		int ix = position.x; ix = ix >= width ? width-1 : (ix < 0 ? 0 : ix);
 		int iy = position.y; iy = iy >= height ? height-1 : (iy < 0 ? 0 : iy);
 
+		auto is_contains = [&](int x, int y) -> auto
+		{
+			const int distance_sq = std::pow(x - ix, 2) + std::pow(y - iy, 2);
+			return std::pair<int, int>(
+				distance_sq - std::pow(radius_outer, 2),
+				distance_sq - std::pow(radius_inner, 2));
+		};
+
 		for (int y = 0; y < height; y++)
 		{
+			if (is_contains(ix, y).first < 0)
 			for (int x = 0; x < width; x++)
 			{
-				const int distance_sq = std::pow(x - ix, 2) + std::pow(y - iy, 2);
-				if (distance_sq <= std::pow(radius, 2))
-				{
-					pixel_at(buffer, x, y) = 0xffff00;
+				const auto [diff_outer, diff_inner] = is_contains(x, y);
+				const uint32_t color = 0xffff00 + (x + y) % 255;
+				if (diff_outer < 0) {
+					const float factor = -diff_outer / float(diff_max);
+					pixel_at(buffer, x, y) = pixel_brightness(color, factor);
+				}
+				if (diff_inner < 0) {
+					pixel_at(buffer, x, y) = color;
 				}
 			}
 		}
@@ -192,6 +210,14 @@ private: /* section: private primary */
 		iassert(location >= 0);
 		iassert(location < buffer->shm_size);
 		return static_cast<uint32_t*>(buffer->shm_data)[location];
+	}
+
+	static uint32_t pixel_brightness(uint32_t color, float factor)
+	{
+		uint8_t* singles = (uint8_t*)&color;
+		for (uint8_t* channel = singles; channel < singles+4; channel++)
+			*channel = std::clamp(int(float(*channel) * factor), 0, 0xff);
+		return color;
 	}
 
 	struct buffer* next_buffer()
