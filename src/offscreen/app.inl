@@ -141,14 +141,14 @@ private: /* section: private primary */
 
 	struct buffer* next_buffer()
 	{
-		struct buffer* buffer;
+		struct buffer* buffer = nullptr;
 
-		if (!buffers[0].busy)
-			buffer = &buffers[0];
-		else if (!buffers[1].busy)
-			buffer = &buffers[1];
-		else
-			return nullptr;
+		for (auto& one : buffers) {
+			if (!one.busy) {
+				buffer = &one;
+				break;
+			}
+		}
 
 		if (!buffer->buffer || rebuild_buffers)
 		{
@@ -257,6 +257,12 @@ public: /* section: listeners */
 		log_event(__func__, "{}x{} {}", width, height, states->size);
 
 		auto app = static_cast<App*>(data);
+
+		for (uint32_t* ptr = (uint32_t*)states->data;
+			 states->size != 0 && (uint8_t*)ptr < ((uint8_t*)states->data + states->size);
+			 ptr++)
+		{
+		}
 
 		if (!((width == 0 || height == 0) || (width == app->width && height == app->height)))
 		{

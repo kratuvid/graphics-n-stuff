@@ -16,7 +16,7 @@
 int main()
 {
 	spdlog::set_level(spdlog::level::debug);
-	spdlog::set_pattern("[%o] [%^%l%$] %v");
+	spdlog::set_pattern("[%^%l%$ +%o] %v");
 
 	App app;
 	try
