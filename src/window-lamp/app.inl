@@ -189,7 +189,7 @@ private: /* section: private primary */
 			for (int x = 0; x < width; x++)
 			{
 				const auto [diff_outer, diff_inner] = is_contains(x, y);
-				const uint32_t color = 0xffff00 + (x + y) % 255;
+				const uint32_t color = 0xcccc00 + (x + y) % 255;
 				if (diff_outer < 0) {
 					const float factor = -diff_outer / float(diff_max);
 					pixel_at(buffer, x, y) = pixel_brightness(color, factor);
