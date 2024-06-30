@@ -3,6 +3,9 @@
 #include <source_location>
 #include <exception>
 
+#include <fcntl.h>
+#include <sys/mman.h>
+
 #include <spdlog/spdlog.h>
 
 #include <wayland-client.h>

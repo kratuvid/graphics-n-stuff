@@ -3,6 +3,37 @@
 
 class App
 {
+private: /* section: variables */
+	struct
+	{
+		wl_display* display;
+		wl_registry* registry;
+		wl_compositor* compositor;
+		xdg_wm_base* wm_base;
+		wl_shm* shm;
+	} wayland {};
+
+	struct
+	{
+		wl_surface* surface;
+		xdg_surface* xsurface;
+		xdg_toplevel* xtoplevel;
+		wl_callback* callback;
+	} window {};
+
+	struct buffer
+	{
+		wl_buffer* buffer;
+		bool busy;
+		void* shm_data;
+		size_t shm_size;
+	} buffers[2] {};
+
+	bool rebuild_buffers = false;
+	bool is_initial_configured = false;
+	bool running = true;
+	int width = 480, height = 320;
+
 public: /* section: public interface */
 	void initialize()
 	{
@@ -18,6 +49,7 @@ public: /* section: public interface */
 
 	~App()
 	{
+		destroy_buffers();
 		destroy_window();
 		destroy_wayland();
 	}
@@ -51,6 +83,20 @@ private: /* section: private interface */
 		while (!is_initial_configured) wl_display_dispatch(wayland.display);
 	}
 
+	void destroy_buffers()
+	{
+		for (auto& buffer : buffers)
+		{
+			safe_free(buffer.buffer, wl_buffer_destroy);
+			if (buffer.shm_data) {
+				munmap(buffer.shm_data, buffer.shm_size);
+				buffer.shm_data = nullptr;
+			}
+			buffer.shm_size = 0;
+			buffer.busy = false;
+		}
+	}
+
 	void destroy_window()
 	{
 		safe_free(window.xtoplevel, xdg_toplevel_destroy);
@@ -67,16 +113,97 @@ private: /* section: private interface */
 		safe_free(wayland.display, wl_display_disconnect);
 	}
 
-public: /* section: listeners */
+public: /* section: primary */
 	static void redraw(void* data, wl_callback* callback, uint32_t time)
 	{
 		auto app = static_cast<App*>(data);
 
+		app->redraw(time);
+
+		if (callback)
+			wl_callback_destroy(callback);
 		iassert(app->window.callback = wl_surface_frame(app->window.surface));
 		wl_callback_add_listener(app->window.callback, &redraw_listener, data);
 		wl_surface_commit(app->window.surface);
 	}
 
+private: /* section: private primary */
+	void redraw(uint32_t time)
+	{
+		auto current_buffer = next_buffer();
+		iassert(current_buffer);
+
+		memset(current_buffer->shm_data, 0x33, current_buffer->shm_size);
+
+		wl_surface_attach(window.surface, current_buffer->buffer, 0, 0);
+		wl_surface_damage_buffer(window.surface, 0, 0, width, height);
+	}
+
+	struct buffer* next_buffer()
+	{
+		struct buffer* buffer;
+
+		if (!buffers[0].busy)
+			buffer = &buffers[0];
+		else if (!buffers[1].busy)
+			buffer = &buffers[1];
+		else
+			return nullptr;
+
+		if (!buffer->buffer || rebuild_buffers)
+		{
+			if (rebuild_buffers) {
+				destroy_buffers();
+				rebuild_buffers = false;
+			}
+			create_shm_buffer(buffer, width, height, WL_SHM_FORMAT_XRGB8888);
+		}
+
+		return buffer;
+	}
+
+	void create_shm_buffer(struct buffer* buffer, int width, int height, uint32_t format)
+	{
+		const size_t stride = width * 4;
+		const size_t size = stride * height;
+		buffer->shm_size = size;
+
+		int fd;
+		iassert((fd = create_anonymous_file(size)) > 0);
+
+		void* data;
+		iassert(data = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+		buffer->shm_data = data;
+
+		wl_shm_pool* pool;
+		iassert(pool = wl_shm_create_pool(wayland.shm, fd, size));
+		iassert(buffer->buffer = wl_shm_pool_create_buffer(pool, 0, width, height, stride, format));
+		wl_buffer_add_listener(buffer->buffer, &buffer_listener, buffer);
+		wl_shm_pool_destroy(pool);
+		close(fd);
+	}
+
+	int create_anonymous_file(size_t size)
+	{
+		int fd, ret;
+
+		fd = memfd_create("opengl-studies", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+		if (fd > 0)
+		{
+			fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK);
+			do {
+				ret = ftruncate(fd, size);
+			} while (ret < 0 && errno == EINTR);
+			if (ret < 0) {
+				close(fd);
+				return -1;
+			}
+		}
+
+		return fd;
+	}
+
+public: /* section: listeners */
 	static void on_registry_global(void* data, wl_registry* registry, uint32_t name, const char* interface, uint32_t version)
 	{
 		log_event(__func__, "{} v{}", interface, version);
@@ -90,7 +217,7 @@ public: /* section: listeners */
 		}
 		else if (strcmp(interface, "wl_compositor") == 0)
 		{
-			iassert(app->wayland.compositor = (wl_compositor*)wl_registry_bind(registry, name, &wl_compositor_interface, 1));
+			iassert(app->wayland.compositor = (wl_compositor*)wl_registry_bind(registry, name, &wl_compositor_interface, 4));
 		}
 		else if (strcmp(interface, "xdg_wm_base") == 0)
 		{
@@ -128,10 +255,31 @@ public: /* section: listeners */
 	static void on_xtoplevel_configure(void* data, xdg_toplevel* xtoplevel, int32_t width, int32_t height, wl_array* states)
 	{
 		log_event(__func__, "{}x{} {}", width, height, states->size);
+
+		auto app = static_cast<App*>(data);
+
+		if (!((width == 0 || height == 0) || (width == app->width && height == app->height)))
+		{
+			app->width = width;
+			app->height = height;
+			app->rebuild_buffers = true;
+		}
+		app->is_initial_configured = false;
 	}
 	static void on_xtoplevel_close(void* data, xdg_toplevel* xtoplevel)
 	{
 		log_event(__func__);
+
+		auto app = static_cast<App*>(data);
+		app->running = false;
+	}
+
+	static void on_buffer_release(void* data, wl_buffer* buffer)
+	{
+		// log_event(__func__, "{}", data);
+
+		auto current_buffer = static_cast<struct buffer*>(data);
+		current_buffer->busy = false;
 	}
 
 	template<class... Args>
@@ -165,6 +313,9 @@ public: /* section: listeners */
 	static constexpr xdg_toplevel_listener xtoplevel_listener {
 		.configure = on_xtoplevel_configure,
 		.close = on_xtoplevel_close
+	};
+	static constexpr wl_buffer_listener buffer_listener {
+		.release = on_buffer_release
 	};
 	static constexpr wl_callback_listener redraw_listener {
 		redraw
@@ -201,26 +352,4 @@ public: /* section: helpers */
 
 public: /* section: public classes */
 	class assertion : public std::exception {};
-
-private: /* section: variables */
-	struct
-	{
-		wl_display* display;
-		wl_registry* registry;
-		wl_compositor* compositor;
-		xdg_wm_base* wm_base;
-		wl_shm* shm;
-	} wayland {};
-
-	struct
-	{
-		wl_surface* surface;
-		xdg_surface* xsurface;
-		xdg_toplevel* xtoplevel;
-		wl_callback* callback;
-	} window {};
-
-	bool is_initial_configured = false;
-	bool running = true;
-	int width = 480, height = 320;
 };
