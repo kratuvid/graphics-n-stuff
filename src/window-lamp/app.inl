@@ -172,8 +172,8 @@ private: /* section: private primary */
 
 		memset(buffer->shm_data, 0x00, buffer->shm_size);
 
-		int ix = position.x; ix = ix >= width ? width-1 : (ix < 0 ? 0 : ix);
-		int iy = position.y; iy = iy >= height ? height-1 : (iy < 0 ? 0 : iy);
+		const int ix = std::clamp(position.x, 0, width-1);
+		const int iy = std::clamp(position.y, 0, height-1);
 
 		auto is_contains = [&](int x, int y) -> auto
 		{
@@ -190,11 +190,11 @@ private: /* section: private primary */
 			{
 				const auto [diff_outer, diff_inner] = is_contains(x, y);
 				const uint32_t color = 0xcccc00 + (x + y) % 255;
-				if (diff_outer < 0) {
-					const float factor = -diff_outer / float(diff_max);
+				if (diff_outer <= 0 && diff_inner > 0) {
+					const float factor = -diff_outer / float(diff_max-1);
 					pixel_at(buffer, x, y) = pixel_brightness(color, factor);
 				}
-				if (diff_inner < 0) {
+				if (diff_inner <= 0) {
 					pixel_at(buffer, x, y) = color;
 				}
 			}
@@ -206,7 +206,7 @@ private: /* section: private primary */
 
 	uint32_t& pixel_at(struct buffer* buffer, int x, int y)
 	{
-		size_t location = (y * width) + x;
+		const size_t location = (y * width) + x;
 		iassert(location >= 0);
 		iassert(location < buffer->shm_size);
 		return static_cast<uint32_t*>(buffer->shm_data)[location];
@@ -214,9 +214,9 @@ private: /* section: private primary */
 
 	static uint32_t pixel_brightness(uint32_t color, float factor)
 	{
-		uint8_t* singles = (uint8_t*)&color;
+		auto singles = (uint8_t*)&color;
 		for (uint8_t* channel = singles; channel < singles+4; channel++)
-			*channel = std::clamp(int(float(*channel) * factor), 0, 0xff);
+			*channel = std::clamp(int(*channel * factor), 0, 0xff);
 		return color;
 	}
 
