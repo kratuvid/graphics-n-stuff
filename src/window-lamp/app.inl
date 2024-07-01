@@ -2,7 +2,7 @@
 #define iassert(expr, ...) if (!(expr)) \
 		App::_iassert(#expr, std::source_location::current() __VA_OPT__(,) __VA_ARGS__);
 #else
-#define iassert(expr, ...) (expr);
+#define iassert(expr, ...) if (!(expr));
 #endif
 
 class App
@@ -192,7 +192,7 @@ private: /* section: private primary */
 				const uint32_t color = 0xcccc00 + (x + y) % 255;
 				if (diff_outer <= 0 && diff_inner > 0) {
 					const float factor = -diff_outer / float(diff_max-1);
-					pixel_at(buffer, x, y) = pixel_brightness(color, factor);
+					pixel_at(buffer, x, y) = pixel_brightness(color, std::sin(factor * float(M_PI_2)));
 				}
 				if (diff_inner <= 0) {
 					pixel_at(buffer, x, y) = color;
