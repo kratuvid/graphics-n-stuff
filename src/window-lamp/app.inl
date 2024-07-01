@@ -172,7 +172,7 @@ private: /* section: private primary */
 
 		memset(buffer->shm_data, 0x00, buffer->shm_size);
 
-		const int ix = std::clamp(position.x, 0, width-1);
+		const int ix = std::clamp(int(position.x + std::sin(time / 100.f) * 10.f), 0, width-1);
 		const int iy = std::clamp(position.y, 0, height-1);
 
 		auto is_contains = [&](int x, int y) -> auto
