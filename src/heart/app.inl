@@ -186,16 +186,22 @@ private: /* section: private primary */
 
 		const uint32_t color = 0xcc3d5c;
 
+		const float time_cons_factor = 4'500;
+		const float time_cons = (uint64_t(time * 1e3f) % uint64_t(time_cons_factor)) / time_cons_factor;
+
 		static float t_start = -M_PI, t_last = -M_PI;
-		const float t_max = ((uint32_t(time * 1e3) % 10'000) / 10'000.f) * 2 * M_PI - M_PI;
+		const float t_max = time_cons * (2.f * M_PI) - M_PI;
+
+		static constexpr float var_min = -1.5f, var_max = 1.5f, var_step = 0.1f;
+		static float var = var_min;
 
 		float t;
-		for (t = t_start; t <= t_max; t += 1e-6f)
+		for (t = t_start; t <= t_max; t += 4e-6f)
 		{
 			for (float mul = 14.5f; mul <= 17.f; mul += 0.06f)
 			{
 				float x = 16 * std::pow(std::sin(t), 3);
-				float y = 13 * std::cos(t) - 5 * std::cos(2 * t) - 2 * std::cos(3 * t) - std::cos(4 * t);
+				float y = 13 * std::cos(t + var) - 5 * std::cos(2 * t) - 2 * std::cos(3 * t) - std::cos(4 * t);
 				x *= mul;
 				y *= mul;
 
@@ -205,6 +211,10 @@ private: /* section: private primary */
 
 		if (t < t_last) {
 			t_start = -M_PI;
+
+			var += var_step;
+			if (var > var_max) var = var_min;
+
 			heart_done = true;
 		}
 
@@ -228,7 +238,6 @@ private: /* section: private primary */
 		static uint32_t redundant;
 		const ssize_t location = at(x, y);
 		if (location < 0 || location >= (ssize_t)buffer->shm_size) {
-			spdlog::debug("Throwing away ({}, {})", x, y);
 			redundant = 0;
 			return redundant;
 		}
