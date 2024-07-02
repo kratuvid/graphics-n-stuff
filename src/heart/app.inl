@@ -177,49 +177,84 @@ private: /* section: private primary */
 		auto buffer = next_buffer();
 		iassert(buffer);
 
-		static bool heart_done = true;
-
-		if (heart_done) {
-			memset(buffer->shm_data, 0x00, buffer->shm_size);
-			heart_done = false;
-		}
-
-		const uint32_t color = 0xcc3d5c;
-
-		const float time_cons_factor = 4'500;
-		const float time_cons = (uint64_t(time * 1e3f) % uint64_t(time_cons_factor)) / time_cons_factor;
-
-		static float t_start = -M_PI, t_last = -M_PI;
-		const float t_max = time_cons * (2.f * M_PI) - M_PI;
-
-		static constexpr float var_min = -1.5f, var_max = 1.5f, var_step = 0.1f;
-		static float var = var_min;
-
-		float t;
-		for (t = t_start; t <= t_max; t += 4e-6f)
+		if (false)
 		{
-			for (float mul = 14.5f; mul <= 17.f; mul += 0.06f)
-			{
-				float x = 16 * std::pow(std::sin(t), 3);
-				float y = 13 * std::cos(t + var) - 5 * std::cos(2 * t) - 2 * std::cos(3 * t) - std::cos(4 * t);
-				x *= mul;
-				y *= mul;
+			static bool heart_done = true;
 
-				pixel_at2(buffer, x, y) = color;
+			if (heart_done) {
+				memset(buffer->shm_data, 0x00, buffer->shm_size);
+				heart_done = false;
+			}
+
+			const uint32_t color = 0xcc3d5c;
+
+			const float time_cons_factor = 4'500;
+			const float time_cons = (uint64_t(time * 1e3f) % uint64_t(time_cons_factor)) / time_cons_factor;
+
+			static float t_start = -M_PI, t_last = -M_PI;
+			const float t_max = time_cons * (2.f * M_PI) - M_PI;
+
+			static constexpr float var_min = -1.5f, var_max = 1.5f, var_step = 0.1f;
+			static float var = var_min;
+
+			float t;
+			for (t = t_start; t <= t_max; t += 8e-6f)
+			{
+				for (float mul = 15.f; mul <= 17.f; mul += 0.06f)
+				{
+					float x = 16 * std::pow(std::sin(t), 3);
+					float y = 13 * std::cos(t + var) - 5 * std::cos(2 * t) - 2 * std::cos(3 * t) - std::cos(4 * t);
+					x *= mul;
+					y *= mul;
+
+					pixel_at2(buffer, x, y) = color;
+				}
+			}
+
+			if (t < t_last) {
+				t_start = -M_PI;
+
+				var += var_step;
+				if (var > var_max) var = var_min;
+
+				heart_done = true;
+			}
+
+			t_start = t_max;
+			t_last = t;
+		}
+		else
+		{
+			memset(buffer->shm_data, 0xff * 0.2f, buffer->shm_size);
+
+			const uint32_t color = 0xcc3d5c;
+
+			static constexpr float var_min = -5.f, var_max = -var_min, var_step = 0.1f;
+			static float var_dir = 1.f, var = var_min;
+
+			for (float t = -M_PI; t <= M_PI; t += 1e-3f)
+			{
+				for (float mul = 15.f; mul <= 17.f; mul += 0.01f)
+				{
+					float x = (var + 16) * std::pow(std::sin(t), 3);
+					float y = (var + 13) * std::cos(t) - 5 * std::cos(2 * t) - 2 * std::cos(3 * t) - std::cos(4 * t);
+					x *= mul;
+					y *= mul;
+
+					pixel_at2(buffer, x, y) = color;
+				}
+			}
+
+			if (true) {
+				var = 3 * (std::sin(time * 1.5f) + 1);
+				var += delta_time * var_dir;
+			} else {
+				if (var > var_max || var < var_min) {
+					var_dir = -var_dir;
+					var = var_dir < 0 ? var_max : var_min;
+				}
 			}
 		}
-
-		if (t < t_last) {
-			t_start = -M_PI;
-
-			var += var_step;
-			if (var > var_max) var = var_min;
-
-			heart_done = true;
-		}
-
-		t_start = t_max;
-		t_last = t;
 
 		wl_surface_attach(window.surface, buffer->buffer, 0, 0);
 		wl_surface_damage_buffer(window.surface, 0, 0, width, height);
@@ -235,12 +270,12 @@ private: /* section: private primary */
 
 	uint32_t& pixel_at(struct buffer* buffer, int x, int y)
 	{
-		static uint32_t redundant;
-		const ssize_t location = at(x, y);
-		if (location < 0 || location >= (ssize_t)buffer->shm_size) {
-			redundant = 0;
-			return redundant;
+		static uint32_t facade;
+		if ((x < 0 or x >= width) or (y < 0 or y >= height)) {
+			facade = 0;
+			return facade;
 		}
+		const ssize_t location = at(x, y);
 		return buffer->shm_data_u32[location];
 	}
 
