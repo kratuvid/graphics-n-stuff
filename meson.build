@@ -8,3 +8,4 @@ inc = include_directories('inc')
 
 executable('window', 'src/window/window.cpp', 'src/wayland/xdg-shell.c', include_directories: inc, dependencies: deps)
 executable('window-lamp', 'src/window-lamp/window.cpp', 'src/wayland/xdg-shell.c', include_directories: inc, dependencies: deps)
+executable('heart', 'src/heart/heart.cpp', 'src/wayland/xdg-shell.c', include_directories: inc, dependencies: deps)
