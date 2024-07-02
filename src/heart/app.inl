@@ -225,28 +225,28 @@ private: /* section: private primary */
 		}
 		else
 		{
-			memset(buffer->shm_data, 0xff * 0.2f, buffer->shm_size);
+			memset(buffer->shm_data, 0x00, buffer->shm_size);
 
 			const uint32_t color = 0xcc3d5c;
 
 			static constexpr float var_min = -5.f, var_max = -var_min, var_step = 0.1f;
 			static float var_dir = 1.f, var = var_min;
 
-			for (float t = -M_PI; t <= M_PI; t += 1e-3f)
+			for (float t = -M_PI; t <= M_PI; t += 2e-3f)
 			{
-				for (float mul = 15.f; mul <= 17.f; mul += 0.01f)
+				for (float mul = 0.f; mul <= 20.f; mul += 0.05f)
 				{
-					float x = (var + 16) * std::pow(std::sin(t), 3);
-					float y = (var + 13) * std::cos(t) - 5 * std::cos(2 * t) - 2 * std::cos(3 * t) - std::cos(4 * t);
-					x *= mul;
-					y *= mul;
+					float x = 16 * std::pow(std::sin(t), 3);
+					float y = 13 * std::cos(t) - 5 * std::cos(2 * t) - 2 * std::cos(3 * t) - std::cos(4 * t);
+					x *= mul + var;
+					y *= mul + var;
 
 					pixel_at2(buffer, x, y) = color;
 				}
 			}
 
 			if (true) {
-				var = 3 * (std::sin(time * 1.5f) + 1);
+				var = 5 * (std::sin(time * 1.5f));
 				var += delta_time * var_dir;
 			} else {
 				if (var > var_max || var < var_min) {
