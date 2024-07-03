@@ -178,7 +178,7 @@ public: /* section: primary */
 							1.f / delta_time,
 							delta_time * 1e3f,
 							app->delta_update_time * 1e3f,
-							app->delta_draw_time * 1e3f,
+							app->delta_draw_time * 1e3f
 					).c_str());
 		}
 
@@ -221,7 +221,7 @@ private: /* Meat: variables */
 
 		uint32_t color;
 		float radius, mass;
-		glm::vec2 pos, vel;
+		glm::vec2 pos, pos_old;
 
 		void setup(App* app, uint32_t color, float radius, float mass)
 		{
@@ -232,25 +232,69 @@ private: /* Meat: variables */
 		}
 
 		void setup_post()
-		{			
-			pos = glm::vec2(0, app->height / 3.f);
-			vel = glm::vec2(-200 + rand() % 400, -200 + rand() % 400);
-			spdlog::debug("v0 of ball {}: |({}, {})| = {}", (void*)this, vel.x, vel.y, glm::length(vel));
+		{
+			const auto vel = glm::linearRand(glm::vec2(-200, -200), glm::vec2(200, 200));
+			const float delta_time = 1.f / 60;
+
+			pos_old = glm::vec2(0, app->height / 3.f);
+			pos = pos_old + vel * delta_time;
+
+			spdlog::debug("v(0): |({}, {})| = {}", vel.x, vel.y, glm::length(vel));
+			spdlog::debug("p(-1): ({}, {}), p(0): ({}, {})", pos_old.x, pos_old.y, pos.x, pos.y);
 		}
+
+		/*
+		void update(float delta_time, const glm::vec2& force)
+		{
+			const glm::vec2 half(app->width / 2.f, app->height / 2.f);
+			const glm::vec4 walls_norm(-half.x + radius, half.x - radius, -half.y + radius, half.y - radius);
+
+			if (pos.x < walls_norm[0]) {
+				pos.x = walls_norm[0];
+				vel.x = -vel.x;
+			} else if (pos.x > walls_norm[1]) {
+				pos.x = walls_norm[1];
+				vel.x = -vel.x;
+			}
+			if (pos.y < walls_norm[2]) {
+				pos.y = walls_norm[2];
+				vel.y = -vel.y;
+			} else if (pos.y > walls_norm[3]) {
+				pos.y = walls_norm[3];
+				vel.y = -vel.y;
+			}
+
+			const auto acc = force / mass;
+			vel += acc * delta_time;
+			pos += vel * delta_time;
+		}
+		*/
 
 		void update(float delta_time, const glm::vec2& force)
 		{
 			const glm::vec2 half(app->width / 2.f, app->height / 2.f);
-			
-			if (pos.x < -half.x + radius or pos.x >= half.x - radius)
-				vel.x = -vel.x;
-			if (pos.y < -half.y + radius or pos.y >= half.y - radius)
-				vel.y = -vel.y;
-			// spdlog::debug("v = ({}, {})", vel.x, vel.y);
+			const glm::vec4 walls_norm(-half.x + radius, half.x - radius, -half.y + radius, half.y - radius);
 
 			const auto acc = force / mass;
-			pos += vel * delta_time;
-			vel += acc * delta_time;
+			const auto vel_like = pos - pos_old;
+
+			pos_old = pos;
+			pos += vel_like + acc * delta_time * delta_time;
+
+			if (pos.x < walls_norm[0]) {
+				pos.x = walls_norm[0];
+				pos_old.x = pos.x + vel_like.x;
+			} else if (pos.x > walls_norm[1]) {
+				pos.x = walls_norm[1];
+				pos_old.x = pos.x + vel_like.x;
+			}
+			if (pos.y < walls_norm[2]) {
+				pos.y = walls_norm[2];
+				pos_old.y = pos.y + vel_like.y;
+			} else if (pos.y > walls_norm[3]) {
+				pos.y = walls_norm[3];
+				pos_old.y = pos.y + vel_like.y;
+			}
 		}
 
 		void draw(struct buffer* buffer)
@@ -489,7 +533,7 @@ public: /* section: listeners */
 	static void on_wm_base_ping(void* data, xdg_wm_base* wm_base, uint32_t serial)
 	{
 		log_event(__func__, "{}", serial);
-		
+
 		xdg_wm_base_pong(wm_base, serial);
 	}
 
@@ -527,7 +571,7 @@ public: /* section: listeners */
 				app->duration_pause += duration_total - duration_last_pause;
 			}
 			break;
-				
+
 			default:
 				break;
 			}
