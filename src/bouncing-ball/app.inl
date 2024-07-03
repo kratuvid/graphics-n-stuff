@@ -27,6 +27,9 @@ private: /* section: variables */
 			wl_pointer* object;
 			glm::ivec2 pos, cpos;
 		} pointer;
+		struct {
+			wl_keyboard* object;
+		} keyboard;
 	} input {};
 
 	struct
@@ -233,7 +236,8 @@ private: /* Meat: variables */
 
 		void setup_post()
 		{
-			const auto vel = glm::linearRand(glm::vec2(-200, -200), glm::vec2(200, 200));
+		    const float base = 400;
+			const auto vel = glm::linearRand(glm::vec2(-1, -1) * base, glm::vec2(1, 1) * base);
 			const float delta_time = 1.f / 60;
 
 			pos_old = glm::vec2(0, app->height / 3.f);
@@ -242,33 +246,6 @@ private: /* Meat: variables */
 			spdlog::debug("v(0): |({}, {})| = {}", vel.x, vel.y, glm::length(vel));
 			spdlog::debug("p(-1): ({}, {}), p(0): ({}, {})", pos_old.x, pos_old.y, pos.x, pos.y);
 		}
-
-		/*
-		void update(float delta_time, const glm::vec2& force)
-		{
-			const glm::vec2 half(app->width / 2.f, app->height / 2.f);
-			const glm::vec4 walls_norm(-half.x + radius, half.x - radius, -half.y + radius, half.y - radius);
-
-			if (pos.x < walls_norm[0]) {
-				pos.x = walls_norm[0];
-				vel.x = -vel.x;
-			} else if (pos.x > walls_norm[1]) {
-				pos.x = walls_norm[1];
-				vel.x = -vel.x;
-			}
-			if (pos.y < walls_norm[2]) {
-				pos.y = walls_norm[2];
-				vel.y = -vel.y;
-			} else if (pos.y > walls_norm[3]) {
-				pos.y = walls_norm[3];
-				vel.y = -vel.y;
-			}
-
-			const auto acc = force / mass;
-			vel += acc * delta_time;
-			pos += vel * delta_time;
-		}
-		*/
 
 		void update(float delta_time, const glm::vec2& force)
 		{
@@ -301,14 +278,13 @@ private: /* Meat: variables */
 		{
 			app->circle(buffer, radius, pos, color, true);
 		}
-	} balls[2];
+	} balls[8];
 
 private: /* Meat: functions */
 	void setup()
 	{
-		const uint32_t colors[2] = {0xffff00, 0x00f0ff};
 		for (unsigned i = 0; i < sizeof(balls) / sizeof(*balls); i++) {
-			balls[i].setup(this, colors[i], 48.f, 1.f);
+			balls[i].setup(this, rand() % 0xff'ff'ff, 32.f, 1.f);
 		}
 	}
 
@@ -320,8 +296,15 @@ private: /* Meat: functions */
 
 	void update(float time, float delta_time)
 	{
+		static glm::ivec2 last_pointer_cpos;
+		const auto force = glm::vec2(input.pointer.cpos) * 2.f;
+		if (input.pointer.cpos != last_pointer_cpos) {
+			spdlog::debug("|F({}, {})| = {:.2f}", force.x, force.y, glm::length(force));
+			last_pointer_cpos = input.pointer.cpos;
+		}
+
 		for (auto& b : balls)
-			b.update(delta_time, glm::vec2(0, -300));
+			b.update(delta_time, force);
 	}
 
 	void draw(struct buffer* buffer)
@@ -597,6 +580,7 @@ public: /* section: listeners */
 	{
 		// log_event(__func__, "{}", data);
 
+
 		auto current_buffer = static_cast<struct buffer*>(data);
 		current_buffer->busy = false;
 	}
@@ -618,6 +602,20 @@ public: /* section: listeners */
 		{
 			if (!(caps & WL_SEAT_CAPABILITY_POINTER)) {
 				safe_free(app->input.pointer.object, wl_pointer_destroy);
+			}
+		}
+
+		if (!app->input.keyboard.object)
+		{
+			if (caps & WL_SEAT_CAPABILITY_KEYBOARD) {
+				iassert(app->input.keyboard.object = wl_seat_get_keyboard(seat));
+				wl_keyboard_add_listener(app->input.keyboard.object, &keyboard_listener, data);
+			}
+		}
+		else
+		{
+			if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD)) {
+				safe_free(app->input.keyboard.object, wl_keyboard_destroy);
 			}
 		}
 	}
@@ -660,6 +658,32 @@ public: /* section: listeners */
 	{
 	}
 
+	static void on_keyboard_keymap(void* data, wl_keyboard* keyboard, uint32_t format, int fd, uint32_t size)
+	{
+		log_event(__func__, "{} {}", fd, size);
+		iassert(format == WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1);
+	}
+	static void on_keyboard_enter(void* data, wl_keyboard* keyboard, uint32_t serial, wl_surface* surface, wl_array* keys)
+	{
+		log_event(__func__);
+	}
+	static void on_keyboard_leave(void* data, wl_keyboard* keyboard, uint32_t serial, wl_surface* surface)
+	{
+		log_event(__func__);
+	}
+	static void on_keyboard_key(void* data, wl_keyboard* keyboard, uint32_t serial, uint32_t time, uint32_t key, uint32_t state)
+	{
+		log_event(__func__, "0x{:x}: {}", key, state);
+	}
+	static void on_keyboard_modifiers(void* data, wl_keyboard* keyboard, uint32_t serial, uint32_t mods_depressed, uint32_t mods_latched, uint32_t mods_locked, uint32_t group)
+	{
+		log_event(__func__);
+	}
+	static void on_keyboard_repeat_info(void* data, wl_keyboard* keyboard, int32_t rate, int32_t delay)
+	{
+		log_event(__func__);
+	}
+
 	static constexpr wl_registry_listener registry_listener {
 		.global = on_registry_global,
 		.global_remove = on_registry_global_remove
@@ -698,11 +722,19 @@ public: /* section: listeners */
 		.axis_stop = on_pointer_axis_stop,
 		.axis_discrete = on_pointer_axis_discrete,
 	};
+	static constexpr wl_keyboard_listener keyboard_listener {
+		.keymap = on_keyboard_keymap,
+		.enter = on_keyboard_enter,
+		.leave = on_keyboard_leave,
+		.key = on_keyboard_key,
+		.modifiers = on_keyboard_modifiers,
+		.repeat_info = on_keyboard_repeat_info
+	};
 
 	template<class... Args>
 	static void log_event(const char* function, Args&&... args)
 	{
-		std::print(stderr, "Event `{}`", function);
+		std::print(stderr, "event {}", function);
 		if constexpr (sizeof...(args) > 0)
 			_log_event_args(args...);
 		std::println("");
