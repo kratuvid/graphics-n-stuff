@@ -5,6 +5,9 @@
 #define iassert(expr, ...) if (!(expr));
 #endif
 
+#include <glm/glm.hpp>
+#include <glm/gtc/random.hpp>
+
 class App
 {
 private: /* section: variables */
@@ -20,8 +23,10 @@ private: /* section: variables */
 
 	struct
 	{
-		wl_pointer* pointer;
-		int pointer_x, pointer_y;
+		struct {
+			wl_pointer* object;
+			glm::ivec2 pos, cpos;
+		} pointer;
 	} input {};
 
 	struct
@@ -47,22 +52,31 @@ private: /* section: variables */
 	bool is_initial_configured = false;
 	bool running = true;
 	int width = 800, height = 600;
-	float delta_redraw_time = 0;
+	float delta_update_time = 0, delta_draw_time = 0;
 
-	std::chrono::high_resolution_clock::time_point tp_begin = std::chrono::high_resolution_clock::now();
+	std::chrono::high_resolution_clock::time_point tp_begin, tp_very_last;
+	std::chrono::nanoseconds duration_pause {0};
+	bool last_window_activated = false;
 
 	static constexpr std::string_view title {"Bouncing Ball"};
 
 public: /* section: public interface */
 	void initialize()
 	{
+		srand(time(nullptr));
 		initialize_wayland();
 		initialize_window();
 	}
 
 	void run()
 	{
+		tp_begin = tp_very_last = std::chrono::high_resolution_clock::now();
+
+		setup();
 		redraw(this, nullptr, 0);
+		wl_display_roundtrip(wayland.display);
+		setup_post();
+
 		while (running && wl_display_dispatch(wayland.display) != -1);
 	}
 
@@ -104,7 +118,7 @@ private: /* section: private interface */
 
 	void destroy_input()
 	{
-		safe_free(input.pointer, wl_pointer_destroy);
+		safe_free(input.pointer.object, wl_pointer_destroy);
 	}
 
 	void destroy_buffers()
@@ -145,18 +159,27 @@ public: /* section: primary */
 
 		static auto tp_last = app->tp_begin;
 		const auto tp_now = std::chrono::high_resolution_clock::now();
-		const float delta_time = std::chrono::duration_cast<std::chrono::nanoseconds>(tp_now - tp_last).count() / 1e9f;
+		if (app->last_window_activated) {
+			tp_last = tp_now;
+			app->last_window_activated = false;
+		}
+		const auto delta_time_raw = tp_now - tp_last;
+		const float delta_time = std::chrono::duration_cast<std::chrono::nanoseconds>(delta_time_raw).count() / 1e9f;
 		tp_last = tp_now;
 
-		const float time = std::chrono::duration_cast<std::chrono::nanoseconds>(tp_now - app->tp_begin).count() / 1e9f;
+		const float time = std::chrono::duration_cast<std::chrono::nanoseconds>((tp_now - app->tp_begin) - app->duration_pause).count() / 1e9f;
 
 		static float last_title_time = -1;
-		if (time - last_title_time > 0.5f) {
+		if (time - last_title_time > 0.1f) {
 			last_title_time = time;
 			xdg_toplevel_set_title(
 				app->window.xtoplevel,
-				std::format("{} - {:.3f} FPS ({:.3f}ms, {:.3f}ms)", title,
-							1.f / delta_time, delta_time * 1e3f, app->delta_redraw_time * 1e3f).c_str());
+				std::format("{} - {:.3f} FPS ({:.3f}ms, {:.3f}ms, {:.3f}ms)", title,
+							1.f / delta_time,
+							delta_time * 1e3f,
+							app->delta_update_time * 1e3f,
+							app->delta_draw_time * 1e3f,
+					).c_str());
 		}
 
 		app->redraw(time, delta_time);
@@ -166,6 +189,8 @@ public: /* section: primary */
 		iassert(app->window.callback = wl_surface_frame(app->window.surface));
 		wl_callback_add_listener(app->window.callback, &redraw_listener, data);
 		wl_surface_commit(app->window.surface);
+
+		app->tp_very_last = std::chrono::high_resolution_clock::now();
 	}
 
 private: /* section: private primary */
@@ -176,27 +201,96 @@ private: /* section: private primary */
 
 		memset(buffer->shm_data, 0x00, buffer->shm_size);
 
-		auto tp_redraw_begin = std::chrono::high_resolution_clock::now();
-		redraw_meat(buffer, time, delta_time);
-		auto tp_redraw_end = std::chrono::high_resolution_clock::now();
-		delta_redraw_time = std::chrono::duration_cast<std::chrono::nanoseconds>(tp_redraw_end - tp_redraw_begin).count() / 1e9f;
+		auto _tp_begin = std::chrono::high_resolution_clock::now();
+		update(time, delta_time);
+		auto _tp_end = std::chrono::high_resolution_clock::now();
+		delta_update_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
+
+		_tp_begin = std::chrono::high_resolution_clock::now();
+		draw(buffer);
+		_tp_end = std::chrono::high_resolution_clock::now();
+		delta_draw_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
 
 		wl_surface_attach(window.surface, buffer->buffer, 0, 0);
 		wl_surface_damage_buffer(window.surface, 0, 0, width, height);
 	}
 
-	void redraw_meat(struct buffer* buffer, float time, float delta_time)
-	{
-		int px = input.pointer_x, py = input.pointer_y;
-		uncentered(px, py);
+private: /* Meat: variables */
+	struct ball {
+		App* app;
 
-		const float radius = std::abs(std::sin(time)) * width/2;
-		circle(buffer, radius, px, py, 0xff00f0, true);
+		uint32_t color;
+		float radius, mass;
+		glm::vec2 pos, vel;
+
+		void setup(App* app, uint32_t color, float radius, float mass)
+		{
+			this->app = app;
+			this->color = color;
+			this->radius = radius;
+			this->mass = mass;
+		}
+
+		void setup_post()
+		{			
+			pos = glm::vec2(0, app->height / 3.f);
+			vel = glm::vec2(-200 + rand() % 400, -200 + rand() % 400);
+			spdlog::debug("v0 of ball {}: |({}, {})| = {}", (void*)this, vel.x, vel.y, glm::length(vel));
+		}
+
+		void update(float delta_time, const glm::vec2& force)
+		{
+			const glm::vec2 half(app->width / 2.f, app->height / 2.f);
+			
+			if (pos.x < -half.x + radius or pos.x >= half.x - radius)
+				vel.x = -vel.x;
+			if (pos.y < -half.y + radius or pos.y >= half.y - radius)
+				vel.y = -vel.y;
+			// spdlog::debug("v = ({}, {})", vel.x, vel.y);
+
+			const auto acc = force / mass;
+			pos += vel * delta_time;
+			vel += acc * delta_time;
+		}
+
+		void draw(struct buffer* buffer)
+		{
+			app->circle(buffer, radius, pos, color, true);
+		}
+	} balls[2];
+
+private: /* Meat: functions */
+	void setup()
+	{
+		const uint32_t colors[2] = {0xffff00, 0x00f0ff};
+		for (unsigned i = 0; i < sizeof(balls) / sizeof(*balls); i++) {
+			balls[i].setup(this, colors[i], 48.f, 1.f);
+		}
 	}
 
-	void circle(struct buffer* buffer, float radius, int cx, int cy, uint32_t color, bool filled = false)
+	void setup_post()
+	{
+		for (auto& b : balls)
+			b.setup_post();
+	}
+
+	void update(float time, float delta_time)
+	{
+		for (auto& b : balls)
+			b.update(delta_time, glm::vec2(0, -300));
+	}
+
+	void draw(struct buffer* buffer)
+	{
+		for (auto& b : balls)
+			b.draw(buffer);
+	}
+
+private: /* helpers */
+	void circle(struct buffer* buffer, float radius, glm::ivec2 center, uint32_t color, bool filled = false)
 	{
 		const float y_max = radius * std::sin(M_PIf / 4);
+		const int cx = center.x, cy = center.y;
 
 		auto mirror = [&](int x, int y) {
 			for (int i = 0; i < 2; i++) {
@@ -419,6 +513,24 @@ public: /* section: listeners */
 			 states->size != 0 && (uint8_t*)ptr < ((uint8_t*)states->data + states->size);
 			 ptr++)
 		{
+			switch (*ptr)
+			{
+			case XDG_TOPLEVEL_STATE_ACTIVATED:
+			{
+				app->last_window_activated = true;
+
+				const auto tp_now = std::chrono::high_resolution_clock::now();
+				const auto
+					duration_total = tp_now - app->tp_begin,
+					duration_last_pause = app->tp_very_last - app->tp_begin;
+
+				app->duration_pause += duration_total - duration_last_pause;
+			}
+			break;
+				
+			default:
+				break;
+			}
 		}
 
 		if (!((width == 0 || height == 0) || (width == app->width && height == app->height)))
@@ -451,17 +563,17 @@ public: /* section: listeners */
 
 		auto app = static_cast<App*>(data);
 
-		if (!app->input.pointer)
+		if (!app->input.pointer.object)
 		{
 			if (caps & WL_SEAT_CAPABILITY_POINTER) {
-				iassert(app->input.pointer = wl_seat_get_pointer(seat));
-				wl_pointer_add_listener(app->input.pointer, &pointer_listener, data);
+				iassert(app->input.pointer.object = wl_seat_get_pointer(seat));
+				wl_pointer_add_listener(app->input.pointer.object, &pointer_listener, data);
 			}
 		}
 		else
 		{
 			if (!(caps & WL_SEAT_CAPABILITY_POINTER)) {
-				safe_free(app->input.pointer, wl_pointer_destroy);
+				safe_free(app->input.pointer.object, wl_pointer_destroy);
 			}
 		}
 	}
@@ -480,8 +592,10 @@ public: /* section: listeners */
 	{
 		auto app = static_cast<App*>(data);
 
-		const int ix = wl_fixed_to_int(x), iy = wl_fixed_to_int(y);
-		app->input.pointer_x = ix; app->input.pointer_y = iy;
+		int ix = wl_fixed_to_int(x), iy = wl_fixed_to_int(y);
+		app->input.pointer.pos = glm::ivec2(ix, iy);
+		app->uncentered(ix, iy);
+		app->input.pointer.cpos = glm::ivec2(ix, iy);
 	}
 	static void on_pointer_button(void* data, wl_pointer* pointer, uint32_t, uint32_t, uint32_t, uint32_t)
 	{
