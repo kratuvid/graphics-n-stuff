@@ -284,8 +284,8 @@ private: /* Meat: variables */
 private: /* Meat: functions */
 	void setup()
 	{
-		for (unsigned i = 0; i < sizeof(balls) / sizeof(*balls); i++) {
-			balls[i].setup(this, rand() % 0xff'ff'ff, 32.f, 1.f);
+		for (auto& b : balls) {
+			b.setup(this, rand() % 0xff'ff'ff, 32.f, 1.f);
 		}
 	}
 
@@ -298,7 +298,7 @@ private: /* Meat: functions */
 	void update(float time, float delta_time)
 	{
 		static glm::ivec2 last_pointer_cpos;
-		const auto force = glm::vec2(input.pointer.cpos) * 2.f;
+		const auto force = glm::vec2(input.pointer.cpos) * 2.f + glm::vec2(0, -600);
 		if (input.pointer.cpos != last_pointer_cpos) {
 			spdlog::debug("|F({}, {})| = {:.2f}", force.x, force.y, glm::length(force));
 			last_pointer_cpos = input.pointer.cpos;
