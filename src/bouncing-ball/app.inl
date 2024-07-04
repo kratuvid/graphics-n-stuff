@@ -77,7 +77,6 @@ public: /* section: public interface */
 
 		setup();
 		redraw(this, nullptr, 0);
-		wl_display_roundtrip(wayland.display);
 		setup_post();
 
 		while (running && wl_display_dispatch(wayland.display) != -1);
@@ -121,6 +120,7 @@ private: /* section: private interface */
 
 	void destroy_input()
 	{
+		safe_free(input.keyboard.object, wl_keyboard_destroy);
 		safe_free(input.pointer.object, wl_pointer_destroy);
 	}
 
@@ -140,6 +140,7 @@ private: /* section: private interface */
 
 	void destroy_window()
 	{
+		safe_free(window.callback, wl_callback_destroy);
 		safe_free(window.xtoplevel, xdg_toplevel_destroy);
 		safe_free(window.xsurface, xdg_surface_destroy);
 		safe_free(window.surface, wl_surface_destroy);
@@ -278,7 +279,7 @@ private: /* Meat: variables */
 		{
 			app->circle(buffer, radius, pos, color, true);
 		}
-	} balls[8];
+	} balls[64];
 
 private: /* Meat: functions */
 	void setup()
@@ -579,7 +580,6 @@ public: /* section: listeners */
 	static void on_buffer_release(void* data, wl_buffer* buffer)
 	{
 		// log_event(__func__, "{}", data);
-
 
 		auto current_buffer = static_cast<struct buffer*>(data);
 		current_buffer->busy = false;
