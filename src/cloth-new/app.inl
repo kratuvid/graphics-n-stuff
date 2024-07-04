@@ -8,9 +8,13 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/random.hpp>
 
+#include <cairomm/cairomm.h>
+
 class App
 {
 private: /* section: variables */
+
+	// wayland
 	struct
 	{
 		wl_display* display;
@@ -50,9 +54,17 @@ private: /* section: variables */
 			uint8_t* shm_data_u8;
 		};
 		size_t shm_size;
+
+		struct {
+			Cairo::RefPtr<Cairo::ImageSurface> surface;
+			Cairo::RefPtr<Cairo::Context> context;
+		} cairo;
 	} buffers[2] {};
 
 	bool rebuild_buffers = false;
+	// END - wayland
+
+	// state
 	bool is_initial_configured = false;
 	bool running = true;
 	int width = 800, height = 600;
@@ -62,7 +74,8 @@ private: /* section: variables */
 	std::chrono::nanoseconds duration_pause {0};
 	bool last_window_activated = false;
 
-	static constexpr std::string_view title {"Cloth"};
+	static constexpr std::string_view title {"Cloth New"};
+	// END - state
 
 public: /* section: public interface */
 	void initialize()
@@ -129,6 +142,8 @@ private: /* section: private interface */
 	{
 		for (auto& buffer : buffers)
 		{
+			buffer.cairo.context.reset();
+			buffer.cairo.surface.reset();
 			safe_free(buffer.buffer, wl_buffer_destroy);
 			if (buffer.shm_data) {
 				munmap(buffer.shm_data, buffer.shm_size);
@@ -209,8 +224,6 @@ private: /* section: private primary */
 		auto _tp_end = std::chrono::high_resolution_clock::now();
 		delta_update_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
 
-		clear(buffer);
-
 		_tp_begin = std::chrono::high_resolution_clock::now();
 		draw(buffer, time);
 		_tp_end = std::chrono::high_resolution_clock::now();
@@ -237,232 +250,34 @@ private: /* Meat: functions */
 
 	void draw(struct buffer* buffer, float time)
 	{
-	}
+		auto& cr = buffer->cairo.context;
+		auto& crs = buffer->cairo.surface;
 
-	void clear(struct buffer* buffer)
-	{
-		memset(buffer->shm_data, 0x00, buffer->shm_size);
-		// std::fill(buffer->shm_data_u8, buffer->shm_data_u8 + buffer->shm_size, 0x00);
-		// std::fill(buffer->shm_data_u32, buffer->shm_data_u32 + buffer->shm_size / 4, 0x0);
+		cr->save(); // save the state of the context
+		cr->set_source_rgb(0.86, 0.85, 0.47);
+		cr->paint();    // fill image with the color
+		cr->restore();  // color is back to black now
+ 
+		cr->save();
+		// draw a border around the image
+		cr->set_line_width(20.0);    // make the line wider
+		cr->rectangle(0.0, 0.0, crs->get_width(), crs->get_height());
+		cr->stroke();
+ 
+		cr->set_source_rgba(0.0, 0.0, 0.0, 0.7);
+		// draw a circle in the center of the image
+		cr->arc(crs->get_width() / 2.0, crs->get_height() / 2.0, 
+				crs->get_height() / 4.0, 0.0, 2.0 * M_PI);
+		cr->stroke();
+ 
+		// draw a diagonal line
+		cr->move_to(crs->get_width() / 4.0, crs->get_height() / 4.0);
+		cr->line_to(crs->get_width() * 3.0 / 4.0, crs->get_height() * 3.0 / 4.0);
+		cr->stroke();
+		cr->restore();
 	}
 
 private: /* Helpers */
-	void line(struct buffer* buffer, const glm::ivec2& start_raw, const glm::ivec2& end_raw, uint32_t color, unsigned thickness_half)
-	{
-		if (start_raw == end_raw) return;
-		if (thickness_half == 0) {
-			line(buffer, start_raw, end_raw, color);
-			return;
-		}
-
-		auto start = &start_raw, end = &end_raw;
-		auto start_float = glm::vec2(*start), end_float = glm::vec2(*end);
-
-		const glm::ivec2 slope_line = *end - *start;
-		const glm::vec2 ref_line = glm::normalize(glm::vec2(-slope_line.y, slope_line.x));
-
-		glm::ivec2 vertices[4];
-		vertices[0] = glm::round(start_float + ref_line * float(thickness_half));
-		vertices[1] = glm::round(end_float + ref_line * float(thickness_half));
-		vertices[2] = glm::round(end_float + ref_line * -float(thickness_half));
-		vertices[3] = glm::round(start_float + ref_line * -float(thickness_half));
-
-		quad(buffer, vertices, color);
-	}
-	
-	void quad(struct buffer* buffer, const glm::ivec2 vertices[4], uint32_t color)
-	{
-		// ISSUE: missing pixels at the diagonal
-		
-		const glm::ivec2 vertices_first[3] = {
-			vertices[0], vertices[1], vertices[2]
-		};
-		const glm::ivec2 vertices_second[3] = {
-			vertices[2], vertices[3], vertices[0]
-		};
-		triangle(buffer, vertices_first, color);
-		triangle(buffer, vertices_second, color);
-	}
-
-	void triangle(struct buffer* buffer, const glm::ivec2 vertices[3], uint32_t color)
-	{
-		glm::ivec2 const* vertices_ptr[3] = {
-			&vertices[0], &vertices[1], &vertices[2]
-		};
-
-		if (vertices_ptr[0]->y < vertices_ptr[1]->y) std::swap(vertices_ptr[0], vertices_ptr[1]);
-		if (vertices_ptr[0]->y < vertices_ptr[2]->y) std::swap(vertices_ptr[0], vertices_ptr[2]);
-		if (vertices_ptr[1]->y < vertices_ptr[2]->y) std::swap(vertices_ptr[1], vertices_ptr[2]);
-
-		if (vertices_ptr[1]->y == vertices_ptr[2]->y) {
-			if (vertices_ptr[1]->x > vertices_ptr[2]->x) std::swap(vertices_ptr[1], vertices_ptr[2]);
-			triangle_flat_bottom(buffer, vertices_ptr, color);
-		}
-		else if (vertices_ptr[0]->y == vertices_ptr[1]->y) {
-			if (vertices_ptr[0]->x > vertices_ptr[1]->x) std::swap(vertices_ptr[0], vertices_ptr[1]);
-			triangle_flat_top(buffer, vertices_ptr, color);
-		} else {
-			const float y = vertices_ptr[1]->y;
-			const float x =
-				vertices_ptr[0]->x
-				+ ((vertices_ptr[1]->y - vertices_ptr[0]->y) / float(vertices_ptr[2]->y - vertices_ptr[0]->y))
-				* (vertices_ptr[2]->x - vertices_ptr[0]->x);
-			glm::ivec2 new_vertex(x, y);
-
-			glm::ivec2 const* vertices_fb[3] {
-				vertices_ptr[0] /* outcast vertex */, vertices_ptr[1], &new_vertex
-			};
-			glm::ivec2 const* vertices_ft[3] {
-				vertices_ptr[1], &new_vertex, vertices_ptr[2] /* outcast vertex */
-			};
-			if (vertices_ptr[1]->x > new_vertex.x) {
-				std::swap(vertices_fb[1], vertices_fb[2]);
-				std::swap(vertices_ft[0], vertices_ft[1]);
-			}
-
-			triangle_flat_bottom(buffer, (const glm::ivec2**) vertices_fb, color);
-			triangle_flat_top(buffer, (const glm::ivec2**) vertices_ft, color);
-		}
-	}
-
-	void triangle_flat_bottom(struct buffer* buffer, const glm::ivec2* const vertices[3], uint32_t color)
-	{
-		const float inverse_slope[2] = {
-			(vertices[1]->x - vertices[0]->x) / float(vertices[1]->y - vertices[0]->y),
-			(vertices[2]->x - vertices[0]->x) / float(vertices[2]->y - vertices[0]->y)
-		};
-
-		float x[2] = {
-			(float) vertices[0]->x,
-			(float) vertices[0]->x
-		};
-
-		for (int scanline_y = vertices[0]->y; scanline_y >= vertices[1]->y; scanline_y--)
-		{
-			pixel_range2(buffer, x[0], scanline_y, x[1], scanline_y, color);
-			x[0] -= inverse_slope[0];
-			x[1] -= inverse_slope[1];
-		}
-	}
-
-	void triangle_flat_top(struct buffer* buffer, const glm::ivec2* const vertices[3], uint32_t color)
-	{
-		const float inverse_slope[2] = {
-			(vertices[2]->x - vertices[0]->x) / float(vertices[2]->y - vertices[0]->y),
-			(vertices[2]->x - vertices[1]->x) / float(vertices[2]->y - vertices[1]->y)
-		};
-
-		float x[2] = {
-			(float) vertices[2]->x,
-			(float) vertices[2]->x
-		};
-
-		for (int scanline_y = vertices[2]->y; scanline_y <= vertices[0]->y; scanline_y++)
-		{
-			pixel_range2(buffer, x[0], scanline_y, x[1], scanline_y, color);
-			x[0] += inverse_slope[0];
-			x[1] += inverse_slope[1];
-		}
-	}
-
-	void line(struct buffer* buffer, const glm::ivec2& start_raw, const glm::ivec2& end_raw, uint32_t color)
-	{
-		// Ref: https://en.wikipedia.org/wiki/Bresenham's_line_algorithm
-
-		auto start = &start_raw, end = &end_raw;
-
-		int dx = end->x - start->x, dy = end->y - start->y;
-
-		if (std::abs(dy) < std::abs(dx)) {
-			if (start->x > end->x) {
-				std::swap(start, end);
-				dx = -dx;
-				dy = -dy;
-			}
-
-			int yi = 1;
-			if (dy < 0) {
-				yi = -1;
-				dy = -dy;
-			}
-			int D = 2 * dy - dx;
-			int y = start->y;
-
-			for (int x = start->x; x <= end->x; x++)
-			{
-				pixel_at2(buffer, x, y) = color;
-				if (D > 0) {
-					y += yi;
-					D += 2 * (dy - dx);
-				} else {
-					D += 2 * dy;
-				}
-			}
-		} else {
-			if (start->y > end->y) {
-				std::swap(start, end);
-				dx = -dx;
-				dy = -dy;
-			}
-
-			int xi = 1;
-			if (dx < 0) {
-				xi = -1;
-				dx = -dx;
-			}
-			int D = 2 * dx - dy;
-			int x = start->x;
-
-			for (int y = start->y; y <= end->y; y++)
-			{
-				pixel_at2(buffer, x, y) = color;
-				if (D > 0) {
-					x += xi;
-					D += 2 * (dx - dy);
-				} else {
-					D += 2 * dx;
-				}
-			}
-		}
-	}
-
-	void circle(struct buffer* buffer, float radius, const glm::ivec2& center, uint32_t color, bool filled = true)
-	{
-		const float y_max = radius * std::sin(M_PIf / 4);
-		const int cx = center.x, cy = center.y;
-
-		auto mirror = [&](int x, int y) {
-			for (int i = 0; i < 2; i++) {
-				if (filled) {
-					pixel_range2(buffer, -x + cx, y + cy, x + cx, y + cy, color);
-					pixel_range2(buffer, -x + cx, -y + cy, x + cx, -y + cy, color);
-				} else {
-					pixel_at2(buffer, x + cx, y + cy) = color;
-					pixel_at2(buffer, -x + cx, y + cy) = color;
-					pixel_at2(buffer, x + cx, -y + cy) = color;
-					pixel_at2(buffer, -x + cx, -y + cy) = color;
-				}
-				std::swap(x, y);
-			}
-		};
-
-		float x = radius, y = 0.f;
-		if (filled) {
-			pixel_range2(buffer, -x + cx, cy, x + cx, cy, color);
-		} else {
-			pixel_at2(buffer, x + cx, cy) = color;
-			pixel_at2(buffer, -x + cx, cy) = color;
-		}
-		pixel_at2(buffer, cx, x + cy) = color;
-		pixel_at2(buffer, cx, -x + cy) = color;
-
-		for (y = 1.f; y <= y_max; y += 1.f)
-		{
-			x = std::sqrt(x*x - 2*y - 1);
-			mirror(x, y);
-		}
-	}
-
 	void pixel_range2(struct buffer* buffer, int x, int y, int ex, int ey, uint32_t color)
 	{
 		centered(x, y);
@@ -515,14 +330,6 @@ private: /* Helpers */
 		return (y * width) + x;
 	}
 
-	static uint32_t pixel_brightness(uint32_t color, float factor)
-	{
-		auto singles = (uint8_t*)&color;
-		for (uint8_t* channel = singles; channel < singles+4; channel++)
-			*channel = std::clamp(int(*channel * factor), 0, 0xff);
-		return color;
-	}
-
 	struct buffer* next_buffer()
 	{
 		struct buffer* buffer = nullptr;
@@ -549,7 +356,10 @@ private: /* Helpers */
 
 	void create_shm_buffer(struct buffer* buffer, int width, int height, uint32_t format)
 	{
-		const size_t stride = width * 4;
+		const auto cr_format = shm_to_cairo_format(format);
+
+		const ssize_t stride = Cairo::ImageSurface::format_stride_for_width(cr_format, width);
+		iassert(stride != -1);
 		const size_t size = stride * height;
 		buffer->shm_size = size;
 
@@ -566,6 +376,9 @@ private: /* Helpers */
 		wl_buffer_add_listener(buffer->buffer, &buffer_listener, buffer);
 		wl_shm_pool_destroy(pool);
 		close(fd);
+
+		buffer->cairo.surface = Cairo::ImageSurface::create((unsigned char*)data, cr_format, width, height, stride);
+		buffer->cairo.context = Cairo::Context::create(buffer->cairo.surface);
 	}
 
 	int create_anonymous_file(size_t size)
@@ -588,10 +401,22 @@ private: /* Helpers */
 		return fd;
 	}
 
+	Cairo::Surface::Format shm_to_cairo_format(uint32_t shm_format)
+	{
+		Cairo::Surface::Format cr_format;
+		switch(shm_format) {
+		case WL_SHM_FORMAT_XRGB8888: cr_format = Cairo::Surface::Format::RGB24; break;
+		case WL_SHM_FORMAT_ARGB8888: cr_format = Cairo::Surface::Format::ARGB32; break;
+		default: iassert(false, "Only certain wl_shm formats are supported");
+			break;
+		}
+		return cr_format;
+	}
+
 public: /* section: listeners */
 	static void on_registry_global(void* data, wl_registry* registry, uint32_t name, const char* interface, uint32_t version)
 	{
-		log_event(__func__, "{} v{}", interface, version);
+		// log_event(__func__, "{} v{}", interface, version);
 
 		auto app = static_cast<App*>(data);
 
@@ -617,24 +442,24 @@ public: /* section: listeners */
 	}
 	static void on_registry_global_remove(void* data, wl_registry* registry, uint32_t name)
 	{
-		log_event(__func__, "{}", name);
+		// log_event(__func__, "{}", name);
 	}
 
 	static void on_shm_format(void* data, wl_shm* shm, uint32_t format)
 	{
-		log_event(__func__, "0x{:x}", format);
+		// log_event(__func__, "0x{:x}", format);
 	}
 
 	static void on_wm_base_ping(void* data, xdg_wm_base* wm_base, uint32_t serial)
 	{
-		log_event(__func__, "{}", serial);
+		// log_event(__func__, "{}", serial);
 
 		xdg_wm_base_pong(wm_base, serial);
 	}
 
 	static void on_xsurface_configure(void* data, xdg_surface* xsurface, uint32_t serial)
 	{
-		log_event(__func__, "{}", serial);
+		// log_event(__func__, "{}", serial);
 
 		auto app = static_cast<App*>(data);
 		app->is_initial_configured = true;
@@ -644,7 +469,7 @@ public: /* section: listeners */
 
 	static void on_xtoplevel_configure(void* data, xdg_toplevel* xtoplevel, int32_t width, int32_t height, wl_array* states)
 	{
-		log_event(__func__, "{}x{} {}", width, height, states->size);
+		// log_event(__func__, "{}x{} {}", width, height, states->size);
 
 		auto app = static_cast<App*>(data);
 
