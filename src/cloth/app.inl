@@ -47,6 +47,7 @@ private: /* section: variables */
 		union {
 			void* shm_data;
 			uint32_t* shm_data_u32;
+			uint8_t* shm_data_u8;
 		};
 		size_t shm_size;
 	} buffers[2] {};
@@ -61,7 +62,7 @@ private: /* section: variables */
 	std::chrono::nanoseconds duration_pause {0};
 	bool last_window_activated = false;
 
-	static constexpr std::string_view title {"Bouncing Ball"};
+	static constexpr std::string_view title {"Cloth"};
 
 public: /* section: public interface */
 	void initialize()
@@ -174,7 +175,7 @@ public: /* section: primary */
 		const float time = std::chrono::duration_cast<std::chrono::nanoseconds>((tp_now - app->tp_begin) - app->duration_pause).count() / 1e9f;
 
 		static float last_title_time = -1;
-		if (time - last_title_time > 0.1f) {
+		if (time - last_title_time > 0.25f) {
 			last_title_time = time;
 			xdg_toplevel_set_title(
 				app->window.xtoplevel,
@@ -203,15 +204,15 @@ private: /* section: private primary */
 		auto buffer = next_buffer();
 		iassert(buffer);
 
-		memset(buffer->shm_data, 0x00, buffer->shm_size);
-
 		auto _tp_begin = std::chrono::high_resolution_clock::now();
 		update(time, delta_time);
 		auto _tp_end = std::chrono::high_resolution_clock::now();
 		delta_update_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
 
+		clear(buffer);
+
 		_tp_begin = std::chrono::high_resolution_clock::now();
-		draw(buffer);
+		draw(buffer, time);
 		_tp_end = std::chrono::high_resolution_clock::now();
 		delta_draw_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
 
@@ -220,102 +221,98 @@ private: /* section: private primary */
 	}
 
 private: /* Meat: variables */
-	struct ball {
-		App* app;
-
-		uint32_t color;
-		float radius, mass;
-		glm::vec2 pos, pos_old;
-
-		void setup(App* app, uint32_t color, float radius, float mass)
-		{
-			this->app = app;
-			this->color = color;
-			this->radius = radius;
-			this->mass = mass;
-		}
-
-		void setup_post()
-		{
-		    const float base = 400;
-			const auto vel = glm::linearRand(glm::vec2(-1, -1) * base, glm::vec2(1, 1) * base);
-			const float delta_time = 1.f / 60;
-
-			pos_old = glm::vec2(0, app->height / 3.f);
-			pos = pos_old + vel * delta_time;
-
-			spdlog::debug("v(0): |({}, {})| = {}", vel.x, vel.y, glm::length(vel));
-			spdlog::debug("p(-1): ({}, {}), p(0): ({}, {})", pos_old.x, pos_old.y, pos.x, pos.y);
-		}
-
-		void update(float delta_time, const glm::vec2& force)
-		{
-			const glm::vec2 half(app->width / 2.f, app->height / 2.f);
-			const glm::vec4 walls_norm(-half.x + radius, half.x - radius, -half.y + radius, half.y - radius);
-
-			const auto acc = force / mass;
-			const auto vel_like = pos - pos_old;
-
-			pos_old = pos;
-			pos += vel_like + acc * delta_time * delta_time;
-
-			if (pos.x < walls_norm[0]) {
-				pos.x = walls_norm[0];
-				pos_old.x = pos.x + vel_like.x;
-			} else if (pos.x > walls_norm[1]) {
-				pos.x = walls_norm[1];
-				pos_old.x = pos.x + vel_like.x;
-			}
-			if (pos.y < walls_norm[2]) {
-				pos.y = walls_norm[2];
-				pos_old.y = pos.y + vel_like.y;
-			} else if (pos.y > walls_norm[3]) {
-				pos.y = walls_norm[3];
-				pos_old.y = pos.y + vel_like.y;
-			}
-		}
-
-		void draw(struct buffer* buffer)
-		{
-			app->circle(buffer, radius, pos, color, true);
-		}
-	} balls[64];
 
 private: /* Meat: functions */
 	void setup()
 	{
-		for (auto& b : balls) {
-			b.setup(this, rand() % 0xff'ff'ff, 32.f, 1.f);
-		}
 	}
 
 	void setup_post()
 	{
-		for (auto& b : balls)
-			b.setup_post();
 	}
 
 	void update(float time, float delta_time)
 	{
-		static glm::ivec2 last_pointer_cpos;
-		const auto force = glm::vec2(input.pointer.cpos) * 2.f + glm::vec2(0, -600);
-		if (input.pointer.cpos != last_pointer_cpos) {
-			spdlog::debug("|F({}, {})| = {:.2f}", force.x, force.y, glm::length(force));
-			last_pointer_cpos = input.pointer.cpos;
-		}
-
-		for (auto& b : balls)
-			b.update(delta_time, force);
 	}
 
-	void draw(struct buffer* buffer)
+	void draw(struct buffer* buffer, float time)
 	{
-		for (auto& b : balls)
-			b.draw(buffer);
+		const float in = time * M_PIf;
+		const float radius = 100.f + glm::abs(glm::sin(in)) * 50.f;
+		line(buffer, glm::vec2(glm::cos(in), glm::sin(in)) * radius, input.pointer.cpos, 0xffffff);
+		circle(buffer, radius, {0, 0}, 0xffffff);
+	}
+
+	void clear(struct buffer* buffer)
+	{
+		memset(buffer->shm_data, 0x00, buffer->shm_size);
+		// std::fill(buffer->shm_data_u8, buffer->shm_data_u8 + buffer->shm_size, 0x00);
+		// std::fill(buffer->shm_data_u32, buffer->shm_data_u32 + buffer->shm_size / 4, 0x00'00'00);
 	}
 
 private: /* helpers */
-	void circle(struct buffer* buffer, float radius, glm::ivec2 center, uint32_t color, bool filled = false)
+	void line(struct buffer* buffer, const glm::ivec2& start_raw, const glm::ivec2& end_raw, uint32_t color)
+	{
+		// Ref: https://en.wikipedia.org/wiki/Bresenham's_line_algorithm
+
+		auto start = &start_raw, end = &end_raw;
+
+		int dx = end->x - start->x, dy = end->y - start->y;
+
+		if (std::abs(dy) < std::abs(dx)) {
+			if (start->x > end->x) {
+				std::swap(start, end);
+				dx = -dx;
+				dy = -dy;
+			}
+
+			int yi = 1;
+			if (dy < 0) {
+				yi = -1;
+				dy = -dy;
+			}
+			int D = 2 * dy - dx;
+			int y = start->y;
+
+			for (int x = start->x; x <= end->x; x++)
+			{
+				pixel_at2(buffer, x, y) = color;
+				if (D > 0) {
+					y += yi;
+					D += 2 * (dy - dx);
+				} else {
+					D += 2 * dy;
+				}
+			}
+		} else {
+			if (start->y > end->y) {
+				std::swap(start, end);
+				dx = -dx;
+				dy = -dy;
+			}
+
+			int xi = 1;
+			if (dx < 0) {
+				xi = -1;
+				dx = -dx;
+			}
+			int D = 2 * dx - dy;
+			int x = start->x;
+
+			for (int y = start->y; y <= end->y; y++)
+			{
+				pixel_at2(buffer, x, y) = color;
+				if (D > 0) {
+					x += xi;
+					D += 2 * (dx - dy);
+				} else {
+					D += 2 * dx;
+				}
+			}
+		}
+	}
+
+	void circle(struct buffer* buffer, float radius, const glm::ivec2& center, uint32_t color, bool filled = false)
 	{
 		const float y_max = radius * std::sin(M_PIf / 4);
 		const int cx = center.x, cy = center.y;
