@@ -237,6 +237,7 @@ private: /* Meat: functions */
 
 	void draw(struct buffer* buffer, float time)
 	{
+		line(buffer, {0, 0}, input.pointer.cpos, 0xfff0f0, 0);
 	}
 
 	void clear(struct buffer* buffer)
@@ -247,6 +248,29 @@ private: /* Meat: functions */
 	}
 
 private: /* helpers */
+	void line(struct buffer* buffer, const glm::ivec2& start_raw, const glm::ivec2& end_raw, uint32_t color, unsigned thickness_half)
+	{
+		if (start_raw == end_raw) return;
+		if (thickness_half == 0) {
+			line(buffer, start_raw, end_raw, color);
+			return;
+		}
+
+		auto start = &start_raw, end = &end_raw;
+		auto start_float = glm::vec2(*start), end_float = glm::vec2(*end);
+
+		const glm::ivec2 slope_line = *end - *start;
+		const glm::vec2 ref_line = glm::normalize(glm::vec2(-slope_line.y, slope_line.x));
+
+		glm::ivec2 vertices[4];
+		vertices[0] = glm::round(start_float + ref_line * float(thickness_half));
+		vertices[1] = glm::round(end_float + ref_line * float(thickness_half));
+		vertices[2] = glm::round(end_float + ref_line * -float(thickness_half));
+		vertices[3] = glm::round(start_float + ref_line * -float(thickness_half));
+
+		quad(buffer, vertices, color);
+	}
+	
 	void quad(struct buffer* buffer, const glm::ivec2 vertices[4], uint32_t color)
 	{
 		// ISSUE: missing pixels at the diagonal
