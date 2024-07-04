@@ -237,10 +237,6 @@ private: /* Meat: functions */
 
 	void draw(struct buffer* buffer, float time)
 	{
-		const float in = time * M_PIf;
-		const float radius = 100.f + glm::abs(glm::sin(in)) * 50.f;
-		line(buffer, glm::vec2(glm::cos(in), glm::sin(in)) * radius, input.pointer.cpos, 0xffffff);
-		circle(buffer, radius, {0, 0}, 0xffffff);
 	}
 
 	void clear(struct buffer* buffer)
@@ -251,6 +247,87 @@ private: /* Meat: functions */
 	}
 
 private: /* helpers */
+	void triangle(struct buffer* buffer, const glm::ivec2 vertices[3], uint32_t color)
+	{
+		glm::ivec2 const* vertices_ptr[3] = {
+			&vertices[0], &vertices[1], &vertices[2]
+		};
+
+		if (vertices_ptr[0]->y < vertices_ptr[1]->y) std::swap(vertices_ptr[0], vertices_ptr[1]);
+		if (vertices_ptr[0]->y < vertices_ptr[2]->y) std::swap(vertices_ptr[0], vertices_ptr[2]);
+		if (vertices_ptr[1]->y < vertices_ptr[2]->y) std::swap(vertices_ptr[1], vertices_ptr[2]);
+
+		if (vertices_ptr[1]->y == vertices_ptr[2]->y) {
+			if (vertices_ptr[1]->x > vertices_ptr[2]->x) std::swap(vertices_ptr[1], vertices_ptr[2]);
+			triangle_flat_bottom(buffer, vertices_ptr, color);
+		}
+		else if (vertices_ptr[0]->y == vertices_ptr[1]->y) {
+			if (vertices_ptr[0]->x > vertices_ptr[1]->x) std::swap(vertices_ptr[0], vertices_ptr[1]);
+			triangle_flat_top(buffer, vertices_ptr, color);
+		} else {
+			const float y = vertices_ptr[1]->y;
+			const float x =
+				vertices_ptr[0]->x
+				+ ((vertices_ptr[1]->y - vertices_ptr[0]->y) / float(vertices_ptr[2]->y - vertices_ptr[0]->y))
+				* (vertices_ptr[2]->x - vertices_ptr[0]->x);
+			glm::ivec2 new_vertex(x, y);
+
+			glm::ivec2 const* vertices_fb[3] {
+				vertices_ptr[0] /* outcast vertex */, vertices_ptr[1], &new_vertex
+			};
+			glm::ivec2 const* vertices_ft[3] {
+				vertices_ptr[1], &new_vertex, vertices_ptr[2] /* outcast vertex */
+			};
+			if (vertices_ptr[1]->x > new_vertex.x) {
+				std::swap(vertices_fb[1], vertices_fb[2]);
+				std::swap(vertices_ft[0], vertices_ft[1]);
+			}
+
+			triangle_flat_bottom(buffer, (const glm::ivec2**) vertices_fb, color);
+			triangle_flat_top(buffer, (const glm::ivec2**) vertices_ft, color);
+		}
+	}
+
+	void triangle_flat_bottom(struct buffer* buffer, const glm::ivec2* vertices[3], uint32_t color)
+	{
+		const float inverse_slope[2] = {
+			(vertices[1]->x - vertices[0]->x) / float(vertices[1]->y - vertices[0]->y),
+			(vertices[2]->x - vertices[0]->x) / float(vertices[2]->y - vertices[0]->y)
+		};
+
+		float x[2] = {
+			(float) vertices[0]->x,
+			(float) vertices[0]->x
+		};
+
+		for (int scanline_y = vertices[0]->y; scanline_y >= vertices[1]->y; scanline_y--)
+		{
+			pixel_range2(buffer, x[0], scanline_y, x[1], scanline_y, color);
+			x[0] -= inverse_slope[0];
+			x[1] -= inverse_slope[1];
+		}
+	}
+
+	void triangle_flat_top(struct buffer* buffer, const glm::ivec2* vertices[3], uint32_t color)
+	{
+		const float inverse_slope[2] = {
+			(vertices[2]->x - vertices[0]->x) / float(vertices[2]->y - vertices[0]->y),
+			(vertices[2]->x - vertices[1]->x) / float(vertices[2]->y - vertices[1]->y)
+		};
+
+		float x[2] = {
+			(float) vertices[2]->x,
+			(float) vertices[2]->x
+		};
+
+		for (int scanline_y = vertices[2]->y; scanline_y <= vertices[0]->y; scanline_y++)
+		{
+			pixel_range2(buffer, x[0], scanline_y, x[1], scanline_y, color);
+			x[0] += inverse_slope[0];
+			x[1] += inverse_slope[1];
+		}
+	}
+
 	void line(struct buffer* buffer, const glm::ivec2& start_raw, const glm::ivec2& end_raw, uint32_t color)
 	{
 		// Ref: https://en.wikipedia.org/wiki/Bresenham's_line_algorithm
