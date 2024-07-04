@@ -237,17 +237,16 @@ private: /* Meat: functions */
 
 	void draw(struct buffer* buffer, float time)
 	{
-		line(buffer, {0, 0}, input.pointer.cpos, 0xfff0f0, 0);
 	}
 
 	void clear(struct buffer* buffer)
 	{
 		memset(buffer->shm_data, 0x00, buffer->shm_size);
 		// std::fill(buffer->shm_data_u8, buffer->shm_data_u8 + buffer->shm_size, 0x00);
-		// std::fill(buffer->shm_data_u32, buffer->shm_data_u32 + buffer->shm_size / 4, 0x00'00'00);
+		// std::fill(buffer->shm_data_u32, buffer->shm_data_u32 + buffer->shm_size / 4, 0x0);
 	}
 
-private: /* helpers */
+private: /* Helpers */
 	void line(struct buffer* buffer, const glm::ivec2& start_raw, const glm::ivec2& end_raw, uint32_t color, unsigned thickness_half)
 	{
 		if (start_raw == end_raw) return;
@@ -275,7 +274,9 @@ private: /* helpers */
 	{
 		// ISSUE: missing pixels at the diagonal
 		
-		const glm::ivec2* vertices_first = vertices;
+		const glm::ivec2 vertices_first[3] = {
+			vertices[0], vertices[1], vertices[2]
+		};
 		const glm::ivec2 vertices_second[3] = {
 			vertices[2], vertices[3], vertices[0]
 		};
@@ -425,7 +426,7 @@ private: /* helpers */
 		}
 	}
 
-	void circle(struct buffer* buffer, float radius, const glm::ivec2& center, uint32_t color, bool filled = false)
+	void circle(struct buffer* buffer, float radius, const glm::ivec2& center, uint32_t color, bool filled = true)
 	{
 		const float y_max = radius * std::sin(M_PIf / 4);
 		const int cx = center.x, cy = center.y;
