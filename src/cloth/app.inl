@@ -247,6 +247,18 @@ private: /* Meat: functions */
 	}
 
 private: /* helpers */
+	void quad(struct buffer* buffer, const glm::ivec2 vertices[4], uint32_t color)
+	{
+		// ISSUE: missing pixels at the diagonal
+		
+		const glm::ivec2* vertices_first = vertices;
+		const glm::ivec2 vertices_second[3] = {
+			vertices[2], vertices[3], vertices[0]
+		};
+		triangle(buffer, vertices_first, color);
+		triangle(buffer, vertices_second, color);
+	}
+
 	void triangle(struct buffer* buffer, const glm::ivec2 vertices[3], uint32_t color)
 	{
 		glm::ivec2 const* vertices_ptr[3] = {
@@ -288,7 +300,7 @@ private: /* helpers */
 		}
 	}
 
-	void triangle_flat_bottom(struct buffer* buffer, const glm::ivec2* vertices[3], uint32_t color)
+	void triangle_flat_bottom(struct buffer* buffer, const glm::ivec2* const vertices[3], uint32_t color)
 	{
 		const float inverse_slope[2] = {
 			(vertices[1]->x - vertices[0]->x) / float(vertices[1]->y - vertices[0]->y),
@@ -308,7 +320,7 @@ private: /* helpers */
 		}
 	}
 
-	void triangle_flat_top(struct buffer* buffer, const glm::ivec2* vertices[3], uint32_t color)
+	void triangle_flat_top(struct buffer* buffer, const glm::ivec2* const vertices[3], uint32_t color)
 	{
 		const float inverse_slope[2] = {
 			(vertices[2]->x - vertices[0]->x) / float(vertices[2]->y - vertices[0]->y),
