@@ -250,31 +250,101 @@ private: /* Meat: functions */
 
 	void draw(struct buffer* buffer, float time)
 	{
-		auto& cr = buffer->cairo.context;
-		auto& crs = buffer->cairo.surface;
+		auto& cr = *buffer->cairo.context;
+		auto& crs = *buffer->cairo.surface;
 
-		cr->save(); // save the state of the context
-		cr->set_source_rgb(0.86, 0.85, 0.47);
-		cr->paint();    // fill image with the color
-		cr->restore();  // color is back to black now
+		sample(time, crs, cr, 2);
+	}
+
+	void sample(float time, Cairo::ImageSurface& crs, Cairo::Context& cr, unsigned id)
+	{
+		switch (id)
+		{
+		case 0: {
+			cr.save(); // save the state of the context
+			cr.set_source_rgb(0.86, 0.85, 0.47);
+			cr.paint();    // fill image with the color
+			cr.restore();  // color is back to black now
  
-		cr->save();
-		// draw a border around the image
-		cr->set_line_width(20.0);    // make the line wider
-		cr->rectangle(0.0, 0.0, crs->get_width(), crs->get_height());
-		cr->stroke();
+			cr.save();
+			// draw a border around the image
+			cr.set_line_width(20.0);    // make the line wider
+			cr.rectangle(0.0, 0.0, crs.get_width(), crs.get_height());
+			cr.stroke();
  
-		cr->set_source_rgba(0.0, 0.0, 0.0, 0.7);
-		// draw a circle in the center of the image
-		cr->arc(crs->get_width() / 2.0, crs->get_height() / 2.0, 
-				crs->get_height() / 4.0, 0.0, 2.0 * M_PI);
-		cr->stroke();
+			cr.set_source_rgba(0.0, 0.0, 0.0, 0.7);
+			// draw a circle in the center of the image
+			cr.arc(crs.get_width() / 2.0, crs.get_height() / 2.0, 
+					crs.get_height() / 4.0, 0.0, 2.0 * M_PI);
+			cr.stroke();
  
-		// draw a diagonal line
-		cr->move_to(crs->get_width() / 4.0, crs->get_height() / 4.0);
-		cr->line_to(crs->get_width() * 3.0 / 4.0, crs->get_height() * 3.0 / 4.0);
-		cr->stroke();
-		cr->restore();
+			// draw a diagonal line
+			cr.move_to(crs.get_width() / 4.0, crs.get_height() / 4.0);
+			cr.line_to(crs.get_width() * 3.0 / 4.0, crs.get_height() * 3.0 / 4.0);
+			cr.stroke();
+			cr.restore();
+		} break;
+
+		case 1: {
+			double xc = width / 2.0;
+			double yc = height / 2.0;
+			double radius = width / 8.0;
+			double line_width = width / 64.0;
+			double angle[2] = {M_PI_4, M_PI};
+
+			cr.save();
+			cr.set_source_rgba(0.3, 0.3, 0.3, 1);
+			cr.paint();
+
+			cr.set_source_rgba(0.1, 0.1, 0.1, 1);
+			cr.set_line_width(line_width);
+			cr.arc(xc, yc, radius, angle[0], angle[1]);
+			cr.stroke();
+
+			cr.set_source_rgba(1, 0.2, 0.2, 0.6);
+			cr.set_line_width(line_width / 3.0);
+
+			cr.arc(xc, yc, radius / 8.0, 0, 2 * M_PI);
+			cr.fill();
+
+			cr.arc(xc, yc, radius, angle[0], angle[1]);
+			cr.line_to(xc, yc);
+			cr.arc(xc, yc, radius, angle[1], angle[1]);
+			cr.line_to(xc, yc);
+			cr.stroke();
+			cr.restore();
+		} break;
+
+		case 2: {
+			double xc = width / 2.0, yc = height / 2.0;
+			const double radius = 50.0 + glm::abs(glm::sin(time)) * 100;
+			const auto& cpos = input.pointer.cpos;
+
+			cr.save();
+
+			cr.translate(width / 2.0, height / 2.0);
+			cr.scale(1, -1);
+
+			cr.set_source_rgba(0, 0, 0, 1);
+			cr.paint();
+
+			cr.set_source_rgba(1, 0, 0, 1);
+
+			for (double xo = -150.0 * 5; xo <= 150.0 * 5; xo += 150.0 * 2)
+			{
+				cr.arc(cpos.x + xo, cpos.y, radius, 0, 2 * M_PI);
+				cr.fill();
+
+				cr.arc(cpos.x, cpos.y + xo, radius, 0, 2 * M_PI);
+				cr.fill();
+			}
+
+			cr.restore();
+		} break;
+
+		default: iassert(false, "Invalid sample ID");
+			break;
+		}
 	}
 
 private: /* Helpers */
