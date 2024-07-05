@@ -89,9 +89,9 @@ public: /* section: public interface */
 	{
 		tp_begin = tp_very_last = std::chrono::high_resolution_clock::now();
 
-		setup();
+		setup_pre();
 		redraw(this, nullptr, 0);
-		setup_post();
+		setup();
 
 		while (running && wl_display_dispatch(wayland.display) != -1);
 	}
@@ -234,117 +234,101 @@ private: /* section: private primary */
 	}
 
 private: /* Meat: variables */
+	const glm::vec2 gravity = glm::vec2(0, -9.8) * 50.f;
+	
+	struct Pendulum {
+		App* app;
+		float width, height;
+
+		glm::vec2 anchor;
+		glm::vec3 color;
+		glm::vec2 rect {32, 32};
+		float radius = 32.f, length, initial_angle;
+
+		float mass = 1.f;
+		glm::vec2 position[3] {};
+
+		void setup_pre(App* app, glm::vec3 const& color, glm::vec2 const& anchor, float length, float initial_angle) {
+			this->app = app;
+			this->color = color;
+			this->anchor = anchor;
+			this->length = length;
+			this->initial_angle = initial_angle;
+		}
+
+		void setup() {
+			width = app->width;
+			height = app->height;
+
+			const float velocity_range = 200;
+			const auto velocity = glm::linearRand(glm::vec2(-3, -0.25) * velocity_range, glm::vec2(3, 2) * velocity_range);
+			const float delta_time = 1.f / 60;
+			
+			position[0] = anchor + glm::vec2(glm::cos(-M_PI_2 + initial_angle), glm::sin(-M_PI_2 + initial_angle)) * length;
+			position[1] = position[0] + velocity * delta_time + 0.5f * app->gravity * delta_time * delta_time;
+			position[2] = position[1];
+		}
+
+		void update(float time, float delta_time, glm::vec2 force) {
+			force += app->gravity * mass;
+			const auto acceleration = force / mass;
+
+			position[2] = 2.f * position[1] - position[0] + acceleration * delta_time * delta_time;
+			position[0] = position[1];
+			position[1] = position[2];
+		}
+
+		void draw(Cairo::Context& cr, Cairo::Surface& crs) {
+			cr.set_source_rgba(0.8, 0.8, 0.8, 1);
+			cr.move_to(anchor.x, anchor.y);
+			cr.set_line_width(16.0);
+			cr.line_to(position[2].x, position[2].y);
+			cr.stroke();
+
+			cr.set_source_rgba(0.8, 0.8, 0.8, 0.75);
+			cr.rectangle(anchor.x - rect.x / 2.0, anchor.y - rect.y / 2.0, rect.x, rect.y);
+			cr.fill();
+			
+			cr.set_source_rgba(color.r, color.g, color.b, 1);
+			cr.arc(position[2].x, position[2].y, radius, 0, 2 * M_PI);
+			cr.fill();
+		}
+	} pendulum;
 
 private: /* Meat: functions */
-	void setup()
+	void setup_pre()
 	{
+		pendulum.setup_pre(this, {1, 0, 0}, {0, 0}, 300.f, M_PI_4);
 	}
 
-	void setup_post()
+	void setup()
 	{
+		pendulum.setup();
 	}
 
 	void update(float time, float delta_time)
 	{
+		glm::vec2 force {};
+
+		pendulum.update(time, delta_time, force);
 	}
 
 	void draw(struct buffer* buffer, float time)
 	{
 		auto& cr = *buffer->cairo.context;
-		auto& crs = *buffer->cairo.surface;
+		[[maybe_unused]] auto& crs = *buffer->cairo.surface;
 
-		sample(time, crs, cr, 2);
-	}
+		cr.save();
 
-	void sample(float time, Cairo::ImageSurface& crs, Cairo::Context& cr, unsigned id)
-	{
-		switch (id)
-		{
-		case 0: {
-			cr.save(); // save the state of the context
-			cr.set_source_rgb(0.86, 0.85, 0.47);
-			cr.paint();    // fill image with the color
-			cr.restore();  // color is back to black now
- 
-			cr.save();
-			// draw a border around the image
-			cr.set_line_width(20.0);    // make the line wider
-			cr.rectangle(0.0, 0.0, crs.get_width(), crs.get_height());
-			cr.stroke();
- 
-			cr.set_source_rgba(0.0, 0.0, 0.0, 0.7);
-			// draw a circle in the center of the image
-			cr.arc(crs.get_width() / 2.0, crs.get_height() / 2.0, 
-					crs.get_height() / 4.0, 0.0, 2.0 * M_PI);
-			cr.stroke();
- 
-			// draw a diagonal line
-			cr.move_to(crs.get_width() / 4.0, crs.get_height() / 4.0);
-			cr.line_to(crs.get_width() * 3.0 / 4.0, crs.get_height() * 3.0 / 4.0);
-			cr.stroke();
-			cr.restore();
-		} break;
+		cr.translate(width / 2.0, height / 2.0);
+		cr.scale(1, -1);
 
-		case 1: {
-			double xc = width / 2.0;
-			double yc = height / 2.0;
-			double radius = width / 8.0;
-			double line_width = width / 64.0;
-			double angle[2] = {M_PI_4, M_PI};
+		cr.set_source_rgba(0, 0, 0, 1);
+		cr.paint();
 
-			cr.save();
-			cr.set_source_rgba(0.3, 0.3, 0.3, 1);
-			cr.paint();
+		pendulum.draw(cr, crs);
 
-			cr.set_source_rgba(0.1, 0.1, 0.1, 1);
-			cr.set_line_width(line_width);
-			cr.arc(xc, yc, radius, angle[0], angle[1]);
-			cr.stroke();
-
-			cr.set_source_rgba(1, 0.2, 0.2, 0.6);
-			cr.set_line_width(line_width / 3.0);
-
-			cr.arc(xc, yc, radius / 8.0, 0, 2 * M_PI);
-			cr.fill();
-
-			cr.arc(xc, yc, radius, angle[0], angle[1]);
-			cr.line_to(xc, yc);
-			cr.arc(xc, yc, radius, angle[1], angle[1]);
-			cr.line_to(xc, yc);
-			cr.stroke();
-			cr.restore();
-		} break;
-
-		case 2: {
-			double xc = width / 2.0, yc = height / 2.0;
-			const double radius = 50.0 + glm::abs(glm::sin(time)) * 100;
-			const auto& cpos = input.pointer.cpos;
-
-			cr.save();
-
-			cr.translate(width / 2.0, height / 2.0);
-			cr.scale(1, -1);
-
-			cr.set_source_rgba(0, 0, 0, 1);
-			cr.paint();
-
-			cr.set_source_rgba(1, 0, 0, 1);
-
-			for (double xo = -150.0 * 5; xo <= 150.0 * 5; xo += 150.0 * 2)
-			{
-				cr.arc(cpos.x + xo, cpos.y, radius, 0, 2 * M_PI);
-				cr.fill();
-
-				cr.arc(cpos.x, cpos.y + xo, radius, 0, 2 * M_PI);
-				cr.fill();
-			}
-
-			cr.restore();
-		} break;
-
-		default: iassert(false, "Invalid sample ID");
-			break;
-		}
+		cr.restore();
 	}
 
 private: /* Helpers */
