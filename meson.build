@@ -22,4 +22,4 @@ executable('window-lamp', 'src/window-lamp/window.cpp', include_directories: inc
 executable('heart', 'src/heart/heart.cpp', include_directories: inc, dependencies: deps_shm)
 executable('bouncing-ball', 'src/bouncing-ball/bouncing-ball.cpp', include_directories: inc, dependencies: deps_shm)
 executable('cloth', 'src/cloth/cloth.cpp', include_directories: inc, dependencies: deps_shm)
-executable('cloth-new', 'src/cloth-new/cloth.cpp', include_directories: inc, dependencies: deps_shm)
+executable('pendulum', 'src/pendulum/main.cpp', include_directories: inc, dependencies: deps_shm)

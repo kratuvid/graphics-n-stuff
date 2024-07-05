@@ -1,12 +1,17 @@
-#ifdef DEBUG
+#ifndef DISABLE_IASSERT
 #define iassert(expr, ...) if (!(expr)) \
 		App::_iassert(#expr, std::source_location::current() __VA_OPT__(,) __VA_ARGS__);
 #else
 #define iassert(expr, ...) if (!(expr));
 #endif
 
+#include <vector>
+
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/random.hpp>
+#include <glm/gtx/vector_angle.hpp>
+#include <glm/gtx/projection.hpp>
 
 #include <cairomm/cairomm.h>
 
@@ -74,7 +79,8 @@ private: /* section: variables */
 	std::chrono::nanoseconds duration_pause {0};
 	bool last_window_activated = false;
 
-	static constexpr std::string_view title {"Cloth New"};
+	static constexpr unsigned substeps = 8;
+	static constexpr std::string_view title {"Pendulum"};
 	// END - state
 
 public: /* section: public interface */
@@ -91,6 +97,7 @@ public: /* section: public interface */
 
 		setup_pre();
 		redraw(this, nullptr, 0);
+		wl_display_roundtrip(wayland.display);
 		setup();
 
 		while (running && wl_display_dispatch(wayland.display) != -1);
@@ -220,7 +227,9 @@ private: /* section: private primary */
 		iassert(buffer);
 
 		auto _tp_begin = std::chrono::high_resolution_clock::now();
-		update(time, delta_time);
+		const float sub_dt = delta_time / substeps;
+		for (unsigned i = 0; i < substeps; i++)
+			update(time + sub_dt * i, sub_dt);
 		auto _tp_end = std::chrono::high_resolution_clock::now();
 		delta_update_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
 
@@ -234,7 +243,7 @@ private: /* section: private primary */
 	}
 
 private: /* Meat: variables */
-	const glm::vec2 gravity = glm::vec2(0, -9.8) * 50.f;
+	glm::vec2 gravity = glm::vec2(0, -9.8) * 100.f;
 	
 	struct Pendulum {
 		App* app;
@@ -243,34 +252,76 @@ private: /* Meat: variables */
 		glm::vec2 anchor;
 		glm::vec3 color;
 		glm::vec2 rect {32, 32};
-		float radius = 32.f, length, initial_angle;
+		float radius = 32.f;
+
+		float theta, NL, k;
 
 		float mass = 1.f;
 		glm::vec2 position[3] {};
 
-		void setup_pre(App* app, glm::vec3 const& color, glm::vec2 const& anchor, float length, float initial_angle) {
+		struct VisualVector {
+			glm::vec2 vector;
+			glm::vec3 color;
+		} forces[3] = {
+			{{}, {0.9, 0.1, 0.1}},
+			{{}, {0.1, 0.9, 0.1}},
+			{{}, {0.1, 0.1, 0.9}},
+		};
+
+		Pendulum(App* app, glm::vec3 const& color, float theta, float NL, float k) {
 			this->app = app;
 			this->color = color;
-			this->anchor = anchor;
-			this->length = length;
-			this->initial_angle = initial_angle;
+			this->theta = theta;
+			this->NL = NL;
+			this->k = k;
 		}
 
-		void setup() {
+		void setup(glm::vec2 const& anchor) {
+			this->anchor = anchor;
+
 			width = app->width;
 			height = app->height;
 
-			const float velocity_range = 200;
+			const float velocity_range = 50;
 			const auto velocity = glm::linearRand(glm::vec2(-3, -0.25) * velocity_range, glm::vec2(3, 2) * velocity_range);
 			const float delta_time = 1.f / 60;
 			
-			position[0] = anchor + glm::vec2(glm::cos(-M_PI_2 + initial_angle), glm::sin(-M_PI_2 + initial_angle)) * length;
+			position[0] = anchor + glm::vec2(glm::cos(-M_PI_2 + theta), glm::sin(-M_PI_2 + theta)) * NL;
 			position[1] = position[0] + velocity * delta_time + 0.5f * app->gravity * delta_time * delta_time;
 			position[2] = position[1];
+			position[2] = position[1] = position[0];
+		}
+
+		glm::vec2 calculate_force(glm::vec2 force) {
+			force += app->gravity * mass;
+
+			const auto length_vector = anchor - position[2];
+			const auto length = glm::length(length_vector);
+			
+			const auto restoring_norm = length_vector / length;
+
+			const float error = length - NL;
+			const auto restoring = restoring_norm * error * k;
+
+			spdlog::debug("theta = {:.2f} deg", glm::degrees(glm::acos(glm::dot(restoring_norm, glm::vec2(0, -1)))));
+			spdlog::debug("dx = {:.2f}", error);
+			spdlog::debug("|exteral force ({:.2f}, {:.2f})| = {:.2f} N", force.x, force.y, glm::length(force));
+			spdlog::debug("|restoring force ({:.2f}, {:.2f})| = {:.2f} N", restoring.x, restoring.y, error);
+
+			forces[0].vector = force;
+			forces[1].vector = restoring;
+
+			force += restoring;
+
+			spdlog::debug("|final force ({:.2f}, {:.2f})| = {:.2f} N", force.x, force.y, glm::length(force));
+
+			forces[2].vector = force;
+
+			return force;
 		}
 
 		void update(float time, float delta_time, glm::vec2 force) {
-			force += app->gravity * mass;
+			force = calculate_force(force);
 			const auto acceleration = force / mass;
 
 			position[2] = 2.f * position[1] - position[0] + acceleration * delta_time * delta_time;
@@ -292,25 +343,50 @@ private: /* Meat: variables */
 			cr.set_source_rgba(color.r, color.g, color.b, 1);
 			cr.arc(position[2].x, position[2].y, radius, 0, 2 * M_PI);
 			cr.fill();
+
+			// for (auto& f : forces) draw_vector(cr, f);
 		}
-	} pendulum;
+
+		void draw_vector(Cairo::Context& cr, VisualVector const& vis_vector) {
+			static constexpr glm::vec2 rect_head(16, 16);
+
+			const auto vector = vis_vector.vector;
+			const auto& color = vis_vector.color;
+			const auto position_head = position[2] + vector;
+
+			cr.set_source_rgba(color.r, color.g, color.b + 0.25, 1);
+			cr.move_to(position[2].x, position[2].y);
+			cr.set_line_width(8.0);
+			cr.line_to(position_head.x, position_head.y);
+			cr.stroke();
+
+			cr.set_source_rgba(color.r, color.g, color.b, 1);
+			cr.rectangle(position_head.x - rect_head.x / 2.0, position_head.y - rect_head.y / 2.0, rect_head.x, rect_head.y);
+			cr.fill();
+		}
+	};
+
+	std::vector<Pendulum> pendulum;
 
 private: /* Meat: functions */
 	void setup_pre()
 	{
-		pendulum.setup_pre(this, {1, 0, 0}, {0, 0}, 300.f, M_PI_4);
+		pendulum.emplace_back(this, glm::vec3(1, 0, 0), glm::linearRand(-M_PI, M_PI), 300, 40);
+		pendulum.emplace_back(this, glm::vec3(0, 1, 0), pendulum[0].theta, 300, 12);
 	}
 
 	void setup()
 	{
-		pendulum.setup();
+		pendulum[0].setup(glm::vec2(-width / 4.0, 0));
+		pendulum[1].setup(glm::vec2(width / 4.0, 0));
 	}
 
 	void update(float time, float delta_time)
 	{
-		glm::vec2 force {};
+		// gravity.y = glm::sin(time * M_PI) * 300.f;
 
-		pendulum.update(time, delta_time, force);
+		glm::vec2 force {};
+		for (auto& p : pendulum) p.update(time, delta_time, force);
 	}
 
 	void draw(struct buffer* buffer, float time)
@@ -326,7 +402,7 @@ private: /* Meat: functions */
 		cr.set_source_rgba(0, 0, 0, 1);
 		cr.paint();
 
-		pendulum.draw(cr, crs);
+		for (auto& p : pendulum) p.draw(cr, crs);
 
 		cr.restore();
 	}
