@@ -5,13 +5,15 @@
 #define iassert(expr, ...) if (!(expr));
 #endif
 
+#include <linux/input-event-codes.h>
+
 #include <vector>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/random.hpp>
 #include <glm/gtx/vector_angle.hpp>
-#include <glm/gtx/projection.hpp>
+#include <glm/gtx/norm.hpp>
 
 #include <cairomm/cairomm.h>
 
@@ -35,6 +37,7 @@ private: /* section: variables */
 		struct {
 			wl_pointer* object;
 			glm::ivec2 pos, cpos;
+			bool button[3];
 		} pointer;
 		struct {
 			wl_keyboard* object;
@@ -243,7 +246,7 @@ private: /* section: private primary */
 	}
 
 private: /* Meat: variables */
-	glm::vec2 gravity = glm::vec2(0, -9.8) * 100.f;
+	glm::vec2 gravity = glm::vec2(0, -9.8) * 1.f;
 	
 	struct Pendulum {
 		App* app;
@@ -251,29 +254,34 @@ private: /* Meat: variables */
 
 		glm::vec2 anchor;
 		glm::vec3 color;
-		glm::vec2 rect {32, 32};
-		float radius = 32.f;
+		const glm::vec2 rect {32, 32};
+		const float radius = 32.f;
 
 		float theta, NL, k;
 
-		float mass = 1.f;
-		glm::vec2 position[3] {};
+		float mass;
+		glm::vec2 gravity;
+		glm::vec2 position {};
+		glm::vec2 velocity {}, velocity_old {};
+		glm::vec2 acceleration {};
 
 		struct VisualVector {
 			glm::vec2 vector;
 			glm::vec3 color;
 		} forces[3] = {
-			{{}, {0.9, 0.1, 0.1}},
-			{{}, {0.1, 0.9, 0.1}},
-			{{}, {0.1, 0.1, 0.9}},
+			{{}, {1, 1, 0.1}},
+			{{}, {0.1, 1, 1}},
+			{{}, {1, 0.1, 1}},
 		};
 
-		Pendulum(App* app, glm::vec3 const& color, float theta, float NL, float k) {
+		Pendulum(App* app, glm::vec3 const& color, float theta, float NL, float k, float mass, glm::vec2 const& gravity) {
 			this->app = app;
 			this->color = color;
 			this->theta = theta;
 			this->NL = NL;
 			this->k = k;
+			this->mass = mass;
+			this->gravity = gravity;
 		}
 
 		void setup(glm::vec2 const& anchor) {
@@ -282,58 +290,103 @@ private: /* Meat: variables */
 			width = app->width;
 			height = app->height;
 
+			position = anchor + glm::vec2(glm::cos(theta), glm::sin(theta)) * NL;
+			/*
 			const float velocity_range = 50;
 			const auto velocity = glm::linearRand(glm::vec2(-3, -0.25) * velocity_range, glm::vec2(3, 2) * velocity_range);
 			const float delta_time = 1.f / 60;
 			
-			position[0] = anchor + glm::vec2(glm::cos(-M_PI_2 + theta), glm::sin(-M_PI_2 + theta)) * NL;
 			position[1] = position[0] + velocity * delta_time + 0.5f * app->gravity * delta_time * delta_time;
 			position[2] = position[1];
-			position[2] = position[1] = position[0];
+			*/
+			velocity_old = velocity = glm::vec2();
+			acceleration = glm::vec2();
 		}
 
 		glm::vec2 calculate_force(glm::vec2 force) {
-			force += app->gravity * mass;
-
-			const auto length_vector = anchor - position[2];
-			const auto length = glm::length(length_vector);
-			
-			const auto restoring_norm = length_vector / length;
-
-			const float error = length - NL;
-			const auto restoring = restoring_norm * error * k;
-
-			spdlog::debug("theta = {:.2f} deg", glm::degrees(glm::acos(glm::dot(restoring_norm, glm::vec2(0, -1)))));
-			spdlog::debug("dx = {:.2f}", error);
-			spdlog::debug("|exteral force ({:.2f}, {:.2f})| = {:.2f} N", force.x, force.y, glm::length(force));
-			spdlog::debug("|restoring force ({:.2f}, {:.2f})| = {:.2f} N", restoring.x, restoring.y, error);
+			force += gravity * mass;
 
 			forces[0].vector = force;
-			forces[1].vector = restoring;
+
+			// Spring restoring force
+			const auto length_vector = anchor - position;
+			const auto length = glm::length(length_vector);
+
+			const float error = length - NL;
+			const auto restoring_norm = length_vector / length;
+			const auto restoring = restoring_norm * error * k;
 
 			force += restoring;
+			// END
 
-			spdlog::debug("|final force ({:.2f}, {:.2f})| = {:.2f} N", force.x, force.y, glm::length(force));
+			// Air drag force
+			const auto drag = 0.5f * 0.47f * (1.225f / 750) * (M_PIf * radius * radius) * velocity;
 
+			force -= drag;
+			// END
+
+			// Wind force
+			glm::vec2 wind(0, 0);
+
+			const auto& button = app->input.pointer.button;
+			if (button[0]) {
+				wind = glm::normalize(glm::vec2(app->input.pointer.cpos));
+			}
+			wind *= 500;
+
+			force += wind;
+			// END
+
+			forces[1].vector = restoring;
 			forces[2].vector = force;
 
 			return force;
 		}
 
-		void update(float time, float delta_time, glm::vec2 force) {
+		void integrate(float delta_time, glm::vec2 force) {
 			force = calculate_force(force);
-			const auto acceleration = force / mass;
 
-			position[2] = 2.f * position[1] - position[0] + acceleration * delta_time * delta_time;
-			position[0] = position[1];
-			position[1] = position[2];
+			// velocity Verlet - doesn't support velocity dependence on acceleration
+			/*
+			position = position + velocity * delta_time + 0.5f * acceleration * delta_time * delta_time;
+			auto new_acceleration = force / mass;
+			velocity = velocity + 0.5f * (acceleration + new_acceleration) * delta_time;
+			acceleration = new_acceleration;
+			*/
+
+			// velocity Verlet - full
+			const auto velocity_mid = velocity + 0.5f * acceleration * delta_time;
+			position = position + velocity_mid * delta_time;
+			const auto new_acceleration = force / mass;
+			velocity = velocity_mid + 0.5f * new_acceleration * delta_time;
+			acceleration = new_acceleration;
+
+			velocity_old = velocity;
+		}
+
+		void collisions(std::vector<Pendulum>& list) {
+			for (Pendulum& p : list) {
+				if (&p != this) {
+					const float distance_sq = glm::length2(p.position - position);
+					const float collision_distance_sq = glm::pow(p.radius + radius, 2);
+					if (distance_sq <= collision_distance_sq) {
+						velocity = (mass - p.mass) * velocity + 2 * p.mass * p.velocity_old;
+						velocity /= mass + p.mass;
+					}
+				}
+			}
+
+			if ((position.x + radius >= width / 2.f) or
+				(position.x - radius <= -width / 2.f)) velocity.x *= -1;
+			if ((position.y + radius >= height / 2.f) or
+				(position.y - radius <= -height / 2.f)) velocity.y *= -1;
 		}
 
 		void draw(Cairo::Context& cr, Cairo::Surface& crs) {
 			cr.set_source_rgba(0.8, 0.8, 0.8, 1);
 			cr.move_to(anchor.x, anchor.y);
 			cr.set_line_width(16.0);
-			cr.line_to(position[2].x, position[2].y);
+			cr.line_to(position.x, position.y);
 			cr.stroke();
 
 			cr.set_source_rgba(0.8, 0.8, 0.8, 0.75);
@@ -341,21 +394,21 @@ private: /* Meat: variables */
 			cr.fill();
 			
 			cr.set_source_rgba(color.r, color.g, color.b, 1);
-			cr.arc(position[2].x, position[2].y, radius, 0, 2 * M_PI);
+			cr.arc(position.x, position.y, radius, 0, 2 * M_PI);
 			cr.fill();
 
-			// for (auto& f : forces) draw_vector(cr, f);
+			// for (auto& f : forces) draw_vector(cr, f, 1.5);
 		}
 
-		void draw_vector(Cairo::Context& cr, VisualVector const& vis_vector) {
+		void draw_vector(Cairo::Context& cr, VisualVector const& vis_vector, float scale = 1.f) {
 			static constexpr glm::vec2 rect_head(16, 16);
 
-			const auto vector = vis_vector.vector;
+			const auto vector = vis_vector.vector * scale;
 			const auto& color = vis_vector.color;
-			const auto position_head = position[2] + vector;
+			const auto position_head = position + vector;
 
 			cr.set_source_rgba(color.r, color.g, color.b + 0.25, 1);
-			cr.move_to(position[2].x, position[2].y);
+			cr.move_to(position.x, position.y);
 			cr.set_line_width(8.0);
 			cr.line_to(position_head.x, position_head.y);
 			cr.stroke();
@@ -371,22 +424,26 @@ private: /* Meat: variables */
 private: /* Meat: functions */
 	void setup_pre()
 	{
-		pendulum.emplace_back(this, glm::vec3(1, 0, 0), glm::linearRand(-M_PI, M_PI), 300, 40);
-		pendulum.emplace_back(this, glm::vec3(0, 1, 0), pendulum[0].theta, 300, 12);
+		const auto base_gravity = gravity * 20.f;
+		const float base_length = 256.f;
+		pendulum.emplace_back(this, glm::vec3(1, 0, 0), glm::linearRand(0.0, M_PI), base_length, 12, 1.f, base_gravity);
+		pendulum.emplace_back(this, glm::vec3(0, 1, 0), pendulum[0].theta, base_length, 12, 5.f, base_gravity);
+		pendulum.emplace_back(this, glm::vec3(0, 0, 1), pendulum[0].theta, base_length, 12, 10.f, base_gravity);
 	}
 
 	void setup()
 	{
 		pendulum[0].setup(glm::vec2(-width / 4.0, 0));
-		pendulum[1].setup(glm::vec2(width / 4.0, 0));
+		pendulum[1].setup(glm::vec2(0, 0));
+		pendulum[2].setup(glm::vec2(width / 4.0, 0));
 	}
 
 	void update(float time, float delta_time)
 	{
-		// gravity.y = glm::sin(time * M_PI) * 300.f;
-
 		glm::vec2 force {};
-		for (auto& p : pendulum) p.update(time, delta_time, force);
+
+		for (auto& p : pendulum) p.collisions(pendulum);
+		for (auto& p : pendulum) p.integrate(delta_time, force);
 	}
 
 	void draw(struct buffer* buffer, float time)
@@ -690,8 +747,14 @@ public: /* section: listeners */
 		// log_event(__func__, "{}", name);
 	}
 
-	static void on_pointer_enter(void* data, wl_pointer* pointer, uint32_t, wl_surface*, wl_fixed_t, wl_fixed_t)
+	static void on_pointer_enter(void* data, wl_pointer* pointer, uint32_t, wl_surface*, wl_fixed_t x, wl_fixed_t y)
 	{
+		auto app = static_cast<App*>(data);
+
+		int ix = wl_fixed_to_int(x), iy = wl_fixed_to_int(y);
+		app->input.pointer.pos = glm::ivec2(ix, iy);
+		app->uncentered(ix, iy);
+		app->input.pointer.cpos = glm::ivec2(ix, iy);
 	}
 	static void on_pointer_leave(void* data, wl_pointer* pointer, uint32_t, wl_surface*)
 	{
@@ -705,8 +768,20 @@ public: /* section: listeners */
 		app->uncentered(ix, iy);
 		app->input.pointer.cpos = glm::ivec2(ix, iy);
 	}
-	static void on_pointer_button(void* data, wl_pointer* pointer, uint32_t, uint32_t, uint32_t, uint32_t)
+	static void on_pointer_button(void* data, wl_pointer* pointer, uint32_t, uint32_t, uint32_t button, uint32_t state)
 	{
+		auto app = static_cast<App*>(data);
+
+		switch (button) {
+		case BTN_LEFT: app->input.pointer.button[0] = state;
+			break;
+		case BTN_MIDDLE: app->input.pointer.button[1] = state;
+			break;
+		case BTN_RIGHT: app->input.pointer.button[2] = state;
+			break;
+		default:
+			break;
+		}
 	}
 	static void on_pointer_axis(void* data, wl_pointer* pointer, uint32_t, uint32_t, wl_fixed_t)
 	{
