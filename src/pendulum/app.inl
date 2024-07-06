@@ -82,7 +82,7 @@ private: /* section: variables */
 	std::chrono::nanoseconds duration_pause {0};
 	bool last_window_activated = false;
 
-	static constexpr unsigned substeps = 8;
+	static constexpr unsigned substeps = 16;
 	static constexpr std::string_view title {"Pendulum"};
 	// END - state
 
@@ -326,13 +326,13 @@ private: /* Meat: variables */
 			// END
 
 			// Wind force
-			glm::vec2 wind(0, 0);
+			glm::vec2 wind {};
 
 			const auto& button = app->input.pointer.button;
 			if (button[0]) {
-				wind = glm::normalize(glm::vec2(app->input.pointer.cpos));
+				wind = glm::vec2(app->input.pointer.cpos) * 2.f;
 			}
-			wind *= 500;
+			// wind *= 500;
 
 			force += wind;
 			// END
