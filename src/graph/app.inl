@@ -8,6 +8,8 @@
 #include <xkbcommon/xkbcommon.h>
 #include <linux/input-event-codes.h>
 
+#include <sys/resource.h>
+
 #include <unordered_map>
 #include <vector>
 
@@ -115,6 +117,12 @@ public: /* section: public interface */
 
 	~App()
 	{
+		rusage usage;
+		if (getrusage(RUSAGE_SELF, &usage) == 0)
+			spdlog::debug("Peak self RSS usage: {:.3f} MB", usage.ru_maxrss / 1024.0);
+		if (getrusage(RUSAGE_CHILDREN, &usage) == 0 && usage.ru_maxrss != 0)
+			spdlog::debug("Peak children RSS usage: {:.3f} MB", usage.ru_maxrss / 1024.0);
+
 		destroy_input();
 		destroy_buffers();
 		destroy_window();
