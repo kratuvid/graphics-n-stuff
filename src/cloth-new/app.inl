@@ -76,14 +76,14 @@ private: /* section: variables */
 	bool is_initial_configured = false;
 	bool running = true;
 	int width = 800, height = 600;
-	float delta_update_time = 0, delta_draw_time = 0;
+	float elapsed_time = 0, delta_update_time = 0, delta_draw_time = 0;
 
 	std::chrono::high_resolution_clock::time_point tp_begin, tp_very_last;
 	std::chrono::nanoseconds duration_pause {0};
 	bool last_window_activated = false;
 
-	static constexpr unsigned substeps = 16;
-	static constexpr std::string_view title {"Two Pendulum"};
+	static constexpr unsigned substeps = 32;
+	static constexpr std::string_view title {"Cloth New"};
 	// END - state
 
 public: /* section: public interface */
@@ -197,11 +197,11 @@ public: /* section: primary */
 		const float delta_time = std::chrono::duration_cast<std::chrono::nanoseconds>(delta_time_raw).count() / 1e9f;
 		tp_last = tp_now;
 
-		const float time = std::chrono::duration_cast<std::chrono::nanoseconds>((tp_now - app->tp_begin) - app->duration_pause).count() / 1e9f;
+		app->elapsed_time = std::chrono::duration_cast<std::chrono::nanoseconds>((tp_now - app->tp_begin) - app->duration_pause).count() / 1e9f;
 
 		static float last_title_time = -1;
-		if (time - last_title_time > 0.25f) {
-			last_title_time = time;
+		if (app->elapsed_time - last_title_time > 0.25f) {
+			last_title_time = app->elapsed_time;
 			xdg_toplevel_set_title(
 				app->window.xtoplevel,
 				std::format("{} - {:.3f} FPS ({:.3f}ms, {:.3f}ms, {:.3f}ms)", title,
@@ -212,7 +212,7 @@ public: /* section: primary */
 					).c_str());
 		}
 
-		app->redraw(time, delta_time);
+		app->redraw(delta_time);
 
 		if (callback)
 			wl_callback_destroy(callback);
@@ -224,20 +224,22 @@ public: /* section: primary */
 	}
 
 private: /* section: private primary */
-	void redraw(float time, float delta_time)
+	void redraw(float delta_time)
 	{
 		auto buffer = next_buffer();
 		iassert(buffer);
 
 		auto _tp_begin = std::chrono::high_resolution_clock::now();
 		const float sub_dt = delta_time / substeps;
-		for (unsigned i = 0; i < substeps; i++)
-			update(time + sub_dt * i, sub_dt);
+		for (unsigned i = 0; i < substeps; i++) {
+			update(sub_dt);
+			elapsed_time += sub_dt;
+		}
 		auto _tp_end = std::chrono::high_resolution_clock::now();
 		delta_update_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
 
 		_tp_begin = std::chrono::high_resolution_clock::now();
-		draw(buffer, time);
+		draw(buffer);
 		_tp_end = std::chrono::high_resolution_clock::now();
 		delta_draw_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
 
@@ -248,254 +250,302 @@ private: /* section: private primary */
 private: /* Meat: variables */
 	glm::vec2 gravity = glm::vec2(0, -9.8) * 1.f;
 
-	struct Pendulum {
+	struct Cloth {
 		App* app;
 		float width, height;
 
-		glm::vec2 anchor;
 		glm::vec3 color;
-		const glm::vec2 rect {32, 32};
-		const float radius = 32.f;
+		float radius = 8.f;
 
-		float theta[2], NL[2], k[2];
-		float mass[2];
+		glm::vec2 extent[2];
+		int grid[2]; // column, rows
+		int grid_size;
+		std::vector<int> anchors;
 
 		glm::vec2 gravity;
-		struct {
-			glm::vec2 position;
-			glm::vec2 velocity, velocity_old;
-			glm::vec2 acceleration;
-		} motion[2] {};
+		float mass, NL[2], k;
+		float Cdis;
 
-		glm::vec2 restoring_second {};
+		struct Motion {
+			glm::vec2 position, velocity, acceleration;
+			// glm::vec2 position, position_old;
+		};
+		std::vector<Motion> motion;
+		std::vector<glm::vec2> forces;
 
-		struct VisualVector {
-			glm::vec2 vector;
-			glm::vec3 color;
-		} forces[2][3] = {{
-				{{}, {1, 1, 0.1}},
-				{{}, {0.1, 1, 1}},
-				{{}, {1, 0.1, 1}},
-			}, {}};
-
-		Pendulum(App* app, glm::vec3 const& color, glm::vec2 const& gravity, const float theta[2], const float NL[2], const float k[2], const float mass[2]) {
+		Cloth(App* app, glm::vec3 const& color, glm::vec2 const& gravity, float mass, const int grid[2], std::vector<int> const& anchors, float k, float Cdis) {
 			this->app = app;
 
-			this->gravity = gravity;
 			this->color = color;
+			this->gravity = gravity;
+			this->mass = mass;
 
-			memcpy(this->theta, theta, sizeof(this->theta));
-			memcpy(this->NL, NL, sizeof(this->NL));
-			memcpy(this->k, k, sizeof(this->k));
-			memcpy(this->mass, mass, sizeof(this->mass));
+			memcpy(this->grid, grid, sizeof(this->grid));
+			this->anchors = anchors;
 
-			memcpy(forces[1], forces[0], sizeof(forces[1]));
+			this->k = k;
+			this->Cdis = Cdis;
+
+			grid_size = grid[0] * grid[1];
+
+			motion.resize(grid_size);
+			forces.resize(grid_size);
 		}
 
-		void setup(glm::vec2 const& anchor) {
-			this->anchor = anchor;
+		int get_index(int j, int i) {
+			return i * grid[0] + j;
+		}
 
+		void setup(const glm::vec2 extent[2]) {
 			width = app->width;
 			height = app->height;
 
-			motion[0].position = anchor + glm::vec2(glm::cos(theta[0]), glm::sin(theta[0])) * NL[0];
-			/*
-			const float velocity_range = 50;
-			const auto velocity = glm::linearRand(glm::vec2(-3, -0.25) * velocity_range, glm::vec2(3, 2) * velocity_range);
-			const float delta_time = 1.f / 60;
+			memcpy(this->extent, extent, sizeof(this->extent));
 
-			position[1] = position[0] + velocity * delta_time + 0.5f * app->gravity * delta_time * delta_time;
-			position[2] = position[1];
-			*/
-			motion[0].velocity_old = motion[0].velocity = glm::vec2();
-			motion[0].acceleration = glm::vec2();
+			const float w = extent[1].x - extent[0].x, h = extent[0].y - extent[1].y;
+			const float dx = w / grid[0], dy = h / grid[1];
 
-			motion[1].position = motion[0].position + glm::vec2(glm::cos(theta[1]), glm::sin(theta[1])) * NL[1];
-			motion[1].velocity_old = motion[1].velocity = glm::vec2();
-			motion[1].acceleration = glm::vec2();
-		}
+			NL[0] = dx; NL[1] = dy;
 
-		glm::vec2 calculate_force(int index, glm::vec2 force) {
-			force += gravity * mass[index];
+			for (int j=0; j < grid[0]; j++)
+			{
+				for (int i=0; i < grid[1]; i++)
+				{
+					const int index = get_index(j, i);
+					auto& m = motion[index];
 
-			forces[index][0].vector = force;
+					const float x = extent[0].x + dx * j, y = extent[0].y - dy * i;
 
-			// Spring restoring force
-			const auto& real_anchor = index == 0 ? anchor : motion[0].position;
-			const auto length_vector = real_anchor - motion[index].position;
-			const auto length = glm::length(length_vector);
-
-			const float error = length - NL[index];
-			const auto restoring_norm = length_vector / length;
-			const auto restoring = restoring_norm * error * k[index];
-
-			if (index == 0) {
-				force += restoring - restoring_second;
-			}
-			if (index == 1) {
-				restoring_second = restoring;
-				force += restoring;
-			}
-			// END
-
-			// Air drag force
-			const auto drag = 0.5f * 0.47f * (1.225f / 1000) * (M_PIf * radius * radius) * motion[index].velocity;
-
-			force -= drag;
-			// END
-
-			// Wind force
-			glm::vec2 wind {};
-
-			const auto& button = app->input.pointer.button;
-			if (button[0]) {
-				wind = glm::vec2(app->input.pointer.cpos) * 2.5f;
-			}
-
-			force += wind;
-			// END
-
-			forces[index][1].vector = restoring;
-			forces[index][2].vector = force;
-
-			return force;
-		}
-
-		void integrate(int index, float delta_time, glm::vec2 force) {
-			force = calculate_force(index, force);
-
-			// velocity Verlet - doesn't support velocity dependence on acceleration
-			/*
-			position = position + velocity * delta_time + 0.5f * acceleration * delta_time * delta_time;
-			auto new_acceleration = force / mass;
-			velocity = velocity + 0.5f * (acceleration + new_acceleration) * delta_time;
-			acceleration = new_acceleration;
-			*/
-
-			// velocity Verlet - full
-			const auto velocity_mid = motion[index].velocity + 0.5f * motion[index].acceleration * delta_time;
-			motion[index].position = motion[index].position + velocity_mid * delta_time;
-			const auto new_acceleration = force / mass[index];
-			motion[index].velocity = velocity_mid + 0.5f * new_acceleration * delta_time;
-			motion[index].acceleration = new_acceleration;
-
-			motion[index].velocity_old = motion[index].velocity;
-		}
-
-		void collisions(int index, std::vector<Pendulum>& list) {
-			/*
-			for (Pendulum& p : list) {
-				if (&p != this) {
-					const float distance_sq = glm::length2(p.position - position);
-					const float collision_distance_sq = glm::pow(p.radius + radius, 2);
-					if (distance_sq <= collision_distance_sq) {
-						velocity = (mass - p.mass) * velocity + 2 * p.mass * p.velocity_old;
-						velocity /= mass + p.mass;
-					}
+					m.position.x = x; m.position.y = y;
+					/*
+					m.position_old = m.position;
+					*/
+					m.velocity = glm::vec2(0, 0);
+					m.acceleration = glm::vec2(0, 0);
 				}
 			}
+		}
 
-			if ((position.x + radius >= width / 2.f) or
-				(position.x - radius <= -width / 2.f)) velocity.x *= -1;
-			if ((position.y + radius >= height / 2.f) or
-				(position.y - radius <= -height / 2.f)) velocity.y *= -1;
-			*/
+		void calculate_forces(glm::vec2 const& ext_force) {
+			const auto& button = app->input.pointer.button;
+
+			memset(&forces[0], 0x00, forces.size() * sizeof(decltype(forces)::value_type));
+
+			for (int j=0; j < grid[0]; j++)
+			{
+				for (int i=0; i < grid[1]; i++)
+				{
+					const int index = get_index(j, i);
+					const bool is_anchor = std::find(anchors.begin(), anchors.end(), index) != anchors.end();
+
+					if (is_anchor)
+						continue;
+
+					auto& m = motion[index];
+
+					glm::vec2 force {};
+
+					force += ext_force;
+					force += gravity * mass;
+
+					if (button[0])
+						force += glm::vec2(app->input.pointer.cpos) * 0.01f;
+
+					force += -Cdis * m.velocity;
+
+					const int indices[4] = { // left, right, top, bottom
+						j == 0 ? -1 : index - 1,
+						j == grid[0] - 1 ? -1 : index + 1,
+						i == 0 ? -1 : index - grid[0],
+						i == grid[1] - 1 ? -1 : index + grid[0]
+					};
+					for (int s=0; s < 4; s++) {
+						const auto neighbour = indices[s];
+						const auto this_NL = s < 2 ? NL[0] : NL[1];
+
+						if (neighbour != -1) {
+							const auto& m_next = motion[neighbour];
+
+							const auto vector = m_next.position - m.position;
+							const auto magnitude_sq = glm::length2(vector);
+
+							if (magnitude_sq != 0.f) {
+								const auto magnitude = glm::sqrt(magnitude_sq);
+								const auto vector_norm = vector / magnitude;
+
+								const float change = magnitude - this_NL;
+								const auto restoring = vector_norm * change * k;
+
+								force += restoring;
+							}
+						}
+					}
+					
+					forces[index] = force;
+				}
+			}
+		}
+
+		void update(float delta_time, glm::vec2 const& ext_force) {
+			calculate_forces(ext_force);
+
+			for (int j=0; j < grid[0]; j++)
+			{
+				for (int i=0; i < grid[1]; i++)
+				{
+					const int index = get_index(j, i);
+					auto& m = motion[index];
+
+					const auto& force = forces[index];
+
+					/* velocity Verlet - full */
+					const auto velocity_mid = m.velocity + 0.5f * m.acceleration * delta_time;
+					m.position = m.position + velocity_mid * delta_time;
+					const auto new_acceleration = force / mass;
+					m.velocity = velocity_mid + 0.5f * new_acceleration * delta_time;
+					m.acceleration = new_acceleration;
+
+					/* velocity Verlet - short */
+					/*
+					m.position = m.position + m.velocity * delta_time + 0.5f * m.acceleration * delta_time * delta_time;
+					const auto new_acceleration = force / mass;
+					m.velocity = m.velocity + 0.5f * (m.acceleration + new_acceleration) * delta_time;
+					m.acceleration = new_acceleration;
+					*/
+
+					/* standard Verlet */
+					/*
+					const auto acceleration = force / mass;
+					const auto new_position = 2.f * m.position - m.position_old + acceleration * delta_time * delta_time;
+					m.position_old = m.position;
+					m.position = new_position;
+					*/
+				}
+			}
 		}
 
 		void draw(Cairo::Context& cr, Cairo::Surface& crs) {
-			const glm::vec2 position[2] = {motion[0].position, motion[1].position};
+			cr.set_source_rgb(0.8, 0.8, 0.8);
+			cr.set_line_width(radius / 3);
 
-			cr.set_source_rgba(0.8, 0.8, 0.8, 1);
-			cr.move_to(anchor.x, anchor.y);
-			cr.set_line_width(16.0);
-			cr.line_to(position[0].x, position[0].y);
-			cr.stroke();
+			for (int i=0; i < grid[1]; i++) // row
+			{
+				for (int j=0; j < grid[0] - 1; j++) // column
+				{
+					const int index = get_index(j, i);
+					const auto& m = motion[index];
+					const auto& m_next = motion[get_index(j+1, i)];
 
-			cr.set_source_rgba(0.8, 0.8, 0.8, 1);
-			cr.move_to(position[0].x, position[0].y);
-			cr.set_line_width(16.0);
-			cr.line_to(position[1].x, position[1].y);
-			cr.stroke();
+					cr.move_to(m.position.x, m.position.y);
+					cr.line_to(m_next.position.x, m_next.position.y);
+					cr.stroke();
+				}
+			}
 
-			cr.set_source_rgba(0.8, 0.8, 0.8, 0.75);
-			cr.rectangle(anchor.x - rect.x / 2.0, anchor.y - rect.y / 2.0, rect.x, rect.y);
-			cr.fill();
+			for (int i=0; i < grid[1] - 1; i++) // row
+			{
+				for (int j=0; j < grid[0]; j++) // column
+				{
+					const int index = get_index(j, i);
+					const auto& m = motion[index];
+					const auto& m_next = motion[get_index(j, i+1)];
 
-			cr.set_source_rgba(color.r, color.g, color.b, 1);
-			cr.arc(position[0].x, position[0].y, radius, 0, 2 * M_PI);
-			cr.fill();
+					cr.move_to(m.position.x, m.position.y);
+					cr.line_to(m_next.position.x, m_next.position.y);
+					cr.stroke();
+				}
+			}
 
-			cr.set_source_rgba(color.r, color.g, color.b, 1);
-			cr.arc(position[1].x, position[1].y, radius, 0, 2 * M_PI);
-			cr.fill();
+			const float radius_rect = radius * 1.1f;
+			const float radius_half = radius_rect / 2;
 
-			// for (auto& f : forces) draw_vector(cr, f, 1.5);
-		}
+			cr.set_source_rgb(color.r, color.g, color.b);
 
-		void draw_vector(Cairo::Context& cr, VisualVector const& vis_vector, float scale = 1.f) {
-			iassert(false);
-			/*
-			static constexpr glm::vec2 rect_head(16, 16);
+			for (int j=0; j < grid[0] and false; j++)
+			{
+				for (int i=0; i < grid[1]; i++)
+				{
+					const int index = get_index(j, i);
+					const auto& position = motion[index].position;
 
-			const auto vector = vis_vector.vector * scale;
-			const auto& color = vis_vector.color;
-			const auto position_head = position + vector;
+					// cr.arc(position.x, position.y, radius, 0, 2 * M_PI);
+					// cr.fill();
 
-			cr.set_source_rgba(color.r, color.g, color.b + 0.25, 1);
-			cr.move_to(position.x, position.y);
-			cr.set_line_width(8.0);
-			cr.line_to(position_head.x, position_head.y);
-			cr.stroke();
-
-			cr.set_source_rgba(color.r, color.g, color.b, 1);
-			cr.rectangle(position_head.x - rect_head.x / 2.0, position_head.y - rect_head.y / 2.0, rect_head.x, rect_head.y);
-			cr.fill();
-			*/
+					cr.rectangle(position.x - radius_half, position.y - radius_half, radius_rect, radius_rect);
+					cr.fill();
+				}
+			}
 		}
 	};
 
-	std::vector<Pendulum> pendulum;
+	std::vector<Cloth> cloth;
 
 private: /* Meat: functions */
 	void setup_pre()
 	{
-		const auto base_gravity = gravity * 50.f;
-		const float base_theta[2] = {glm::linearRand(0.f, 2 * M_PIf), glm::linearRand(0.f, 2 * M_PIf)};
-		const float base_NL[2] = {196, 128};
-		float base_k[2] = {16, 16};
-		float base_mass[2] = {1.f, 1.f};
-		pendulum.emplace_back(this, glm::vec3(1, 0, 0), base_gravity, base_theta, base_NL, base_k, base_mass);
+		const auto base_gravity = gravity * 64.f;
+		float mass = 1 / 1e3f;
+		float k = 7;
+		float Cdis = 0.03f;
+		int grid[2] = {70, 49};
 
-		base_k[0] *= 0.5f;
-		pendulum.emplace_back(this, glm::vec3(0, 1, 0), base_gravity, base_theta, base_NL, base_k, base_mass);
+		auto get_index = [&](int j, int i) -> int {
+			return i * grid[0] + j;
+		};
 
-		base_k[0] = 16;
-		base_k[1] *= 0.5f;
-		pendulum.emplace_back(this, glm::vec3(0, 0, 1), base_gravity, base_theta, base_NL, base_k, base_mass);
+		std::vector<int> anchors;
+        // std::vector<int> anchors {0, grid[0]-1};
+		// std::vector<int> anchors {grid[0] / 2};
+		// std::vector<int> anchors {0, grid[0]/2, grid[0]-1};
+		/*
+		std::vector<int> anchors {
+			0, get_index(grid[0]-1, 0),
+			get_index(0, grid[1] / 2), get_index(grid[0]-1, grid[1] / 2),
+			get_index(grid[0] / 2, 0), get_index(grid[0] / 2, grid[1]-1),
+			get_index(0, grid[1]-1), get_index(grid[0]-1, grid[1]-1)
+			};
+		*/
+		/*
+		for (int j=0; j < grid[0]; j++) {
+			anchors.push_back(get_index(j, 0));
+			anchors.push_back(get_index(j, grid[1]-1));
+		}
+		for (int i=0; i < grid[1]; i++) {
+			anchors.push_back(get_index(0, i));
+			anchors.push_back(get_index(grid[0]-1, i));
+		}
+		*/
+		// anchors.push_back(get_index(grid[0]/2, grid[1]/2));
+		/*
+		for (int j=0; j < grid[0]; j++) {
+			anchors.push_back(get_index(j, grid[1]/4));
+		}
+		*/
+		for (int j=0; j < grid[0]; j++) {
+			if (j % 8 == 0)
+				anchors.push_back(get_index(j, 0));
+		}
+
+		cloth.emplace_back(this, glm::vec3(1, 0, 0), base_gravity, mass, grid, anchors, k, Cdis);
 	}
 
 	void setup()
 	{
-		pendulum[0].setup(glm::vec2(-width / 4.0, 0));
-		pendulum[1].setup(glm::vec2(0, 0));
-		pendulum[2].setup(glm::vec2(width / 4.0, 0));
+		glm::vec2 extent[2] = {
+			{-width / 3.5f, height / 2.15f},
+			{width / 3.5f, -height / 2.75f}
+		};
+		cloth[0].setup(extent);
 	}
 
-	void update(float time, float delta_time)
+	void update(float delta_time)
 	{
 		glm::vec2 force {};
 
-		for (auto& p : pendulum) {
-			for (int i=0; i < 2; i++) {
-				p.collisions(i, pendulum);
-			}
-			for (int i=1; i >= 0; i--) {
-				p.integrate(i, delta_time, force);
-			}
-		}
+		for (auto& c : cloth) c.update(delta_time, force);
 	}
 
-	void draw(struct buffer* buffer, float time)
+	void draw(struct buffer* buffer)
 	{
 		auto& cr = *buffer->cairo.context;
 		[[maybe_unused]] auto& crs = *buffer->cairo.surface;
@@ -508,7 +558,7 @@ private: /* Meat: functions */
 		cr.set_source_rgba(0, 0, 0, 1);
 		cr.paint();
 
-		for (auto& p : pendulum) p.draw(cr, crs);
+		for (auto& c : cloth) c.draw(cr, crs);
 
 		cr.restore();
 	}

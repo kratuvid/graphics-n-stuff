@@ -24,3 +24,4 @@ executable('bouncing-ball', 'src/bouncing-ball/bouncing-ball.cpp', include_direc
 executable('cloth', 'src/cloth/cloth.cpp', include_directories: inc, dependencies: deps_shm)
 executable('pendulum', 'src/pendulum/main.cpp', include_directories: inc, dependencies: deps_shm)
 executable('two-pendulum', 'src/two-pendulum/main.cpp', include_directories: inc, dependencies: deps_shm)
+executable('cloth-new', 'src/cloth-new/main.cpp', include_directories: inc, dependencies: deps_shm)	
