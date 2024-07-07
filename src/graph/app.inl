@@ -263,7 +263,7 @@ private: /* Meat: variables */
 private: /* Meat: functions */
 	void setup_pre()
 	{
-		for (auto sym : {XKB_KEY_plus, XKB_KEY_minus})
+		for (auto sym : {XKB_KEY_plus, XKB_KEY_minus, XKB_KEY_i})
 			input.keyboard.map.insert({sym, WL_KEYBOARD_KEY_STATE_RELEASED});
 	}
 
@@ -299,19 +299,32 @@ private: /* Meat: functions */
 				spdlog::debug("Zoom factor: {}x", 1 / factor);
 			}
 
-			const float a = 1, b = 1, c = -6;
+			const float var = glm::sin(elapsed_time * 2 * M_PI);
 			auto f = [&](float x) -> float {
 				x *= factor;
-				float f_x = a * x * x + b * x + c;
+				float f_x = glm::sin(x) * 200.f;
 				f_x *= factor;
 				return f_x;
 			};
+
+			static auto last_cpos = input.pointer.cpos;
+			const auto& cpos = input.pointer.cpos;
+			if (cpos.x != last_cpos.x) {
+				spdlog::debug("f({}) = {}", cpos.x * factor, f(cpos.x));
+				last_cpos.x = cpos.x;
+			}
 
 			const float min = -width / 2.0, max = width / 2.0;
 			const float
 				f_min = f(min),
 				f_max = f(max);
 			const float dx = 0.1f;
+
+			if (kb.map[XKB_KEY_i]) {
+				spdlog::debug("Extent: f({}) -> f({}) = {} -> {}",
+							  min * factor, max * factor,
+							  f_min, f_max);
+			}
 
 			cr.move_to(min, f_min);
 			for (float x = min + dx; x <= max; x += dx) {
