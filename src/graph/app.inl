@@ -118,8 +118,13 @@ public: /* section: public interface */
 	~App()
 	{
 		rusage usage;
-		if (getrusage(RUSAGE_SELF, &usage) == 0)
+		if (getrusage(RUSAGE_SELF, &usage) == 0) {
 			spdlog::debug("Peak self RSS usage: {:.3f} MB", usage.ru_maxrss / 1024.0);
+			spdlog::debug("User CPU time: {:.3f} s", usage.ru_utime.tv_sec + usage.ru_utime.tv_usec / 1e6f);
+			spdlog::debug("System CPU time: {:.3f} s", usage.ru_stime.tv_sec + usage.ru_stime.tv_usec / 1e6f);
+			// spdlog::debug("Voluntary context switches: {}", usage.ru_nvcsw);
+			// spdlog::debug("Involuntary context switches: {}", usage.ru_nivcsw);
+		}
 		if (getrusage(RUSAGE_CHILDREN, &usage) == 0 && usage.ru_maxrss != 0)
 			spdlog::debug("Peak children RSS usage: {:.3f} MB", usage.ru_maxrss / 1024.0);
 
