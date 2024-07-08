@@ -1,4 +1,10 @@
-#include "pch/pch.hpp"
+#include "raytracer/pch.hpp"
+
+#include <thread>
+#include <semaphore>
+
+#include "raytracer/types.hpp"
+#include "raytracer/ray.hpp"
 
 #ifndef DISABLE_IASSERT
 #define iassert(expr, ...) \
@@ -63,6 +69,9 @@ private: /* section: variables */
             Cairo::RefPtr<Cairo::ImageSurface> surface;
             Cairo::RefPtr<Cairo::Context> context;
         } cairo;
+		struct {
+			Glib::RefPtr<Pango::Layout> layout;
+		} pango;
     } buffers[2] {};
 
     bool rebuild_buffers = false;
@@ -88,6 +97,7 @@ public: /* section: public interface */
         srand(time(nullptr));
         initialize_wayland();
         initialize_window();
+		initialize_pango();
     }
 
     void run()
@@ -101,6 +111,8 @@ public: /* section: public interface */
 
         while (running && wl_display_dispatch(wayland.display) != -1)
             {}
+        
+        destroy();
     }
 
     ~App()
@@ -118,6 +130,7 @@ public: /* section: public interface */
 
         destroy_input();
         destroy_buffers();
+		destroy_pango();
         destroy_window();
         destroy_wayland();
     }
@@ -151,6 +164,20 @@ private: /* section: private interface */
             wl_display_dispatch(wayland.display);
     }
 
+	void initialize_pango()
+	{
+		Pango::init();
+	}
+
+	void destroy_pango()
+	{
+		/* Requires linking and stuff. Live with the memory leak for now
+		pango_cairo_font_map_set_default(NULL);
+		cairo_debug_reset_static_data();
+		FcFini();
+		*/
+	}
+
     void destroy_input()
     {
         safe_free(input.keyboard.xkb.state, xkb_state_unref);
@@ -163,6 +190,7 @@ private: /* section: private interface */
     void destroy_buffers()
     {
         for (auto& buffer : buffers) {
+			buffer.pango.layout.reset();
             buffer.cairo.context.reset();
             buffer.cairo.surface.reset();
             safe_free(buffer.buffer, wl_buffer_destroy);
@@ -220,7 +248,7 @@ public: /* section: primary */
                     delta_time * 1e3f,
                     app->delta_update_time * 1e3f,
                     app->delta_draw_time * 1e3f)
-                    .c_str());
+                .c_str());
         }
 
         app->redraw(delta_time);
@@ -260,6 +288,46 @@ private: /* section: private primary */
     }
 
 private: /* Meat: variables */
+    struct  {
+        std::thread thread;
+
+        struct {
+            float percentage = 0.f;
+            std::atomic_bool finished = false;
+            std::chrono::nanoseconds time;
+
+            std::vector<uint32_t> canvas;
+        } out;
+
+        struct {
+            int width, height;
+			bool kill = false;
+			std::binary_semaphore semaphore {0};
+
+			ovec3 offset {};
+        } in;
+
+		struct {
+			std::atomic_bool stop = false;
+		} inout;
+
+		void setup(App* app) {
+			thread = std::thread(workspace, std::ref(*this));
+		}
+
+		void destroy() {
+			in.kill = inout.stop = true;
+			in.semaphore.release();
+
+			if (thread.native_handle())
+				thread.join();
+		}
+    } worker;
+
+	bool setup_finished = false;
+	int last_dimens[2] {-1, -1};
+	bool render_again = false;
+
 private: /* Meat: functions */
     void setup_pre()
     {
@@ -269,24 +337,202 @@ private: /* Meat: functions */
 
     void setup()
     {
+		worker.setup(this);
+		setup_finished = true;
+    }
+    
+    void destroy()
+    {
+		worker.destroy();
     }
 
     void update(float delta_time)
     {
+		if (setup_finished and (width != last_dimens[0] or height != last_dimens[1] or render_again)) {
+			worker.in.width = width; worker.in.height = height;
+			worker.out.canvas.resize(width * height);
+
+			worker.inout.stop = true;
+			worker.in.semaphore.release();
+
+			last_dimens[0] = width; last_dimens[1] = height;
+			render_again = false;
+		}
+    }
+
+	void on_key(xkb_keysym_t sym, wl_keyboard_key_state state)
+	{
+		if (!state)
+		{
+			switch (sym)
+			{
+			case XKB_KEY_w: worker.in.offset.y += 0.1;
+				render_again = true;
+				break;
+			case XKB_KEY_s: worker.in.offset.y -= 0.1;
+				render_again = true;
+				break;
+			case XKB_KEY_d: worker.in.offset.x += 0.1;
+				render_again = true;
+				break;
+			case XKB_KEY_a: worker.in.offset.x -= 0.1;
+				render_again = true;
+				break;
+			case XKB_KEY_e: worker.in.offset.z -= 0.1;
+				render_again = true;
+				break;
+			case XKB_KEY_q: worker.in.offset.z += 0.1;
+				render_again = true;
+				break;
+			}
+
+			worker.in.offset = glm::clamp(worker.in.offset, ovec3(-1, -1, -1), ovec3(1, 1, 1));
+		}
+	}
+    
+    static void workspace(decltype(worker)& state)
+    {
+		while (true)
+		{
+			state.in.semaphore.acquire();
+
+			if (state.in.kill) break;
+			
+			state.inout.stop = false;
+			state.out.finished = false;
+
+			auto offset = state.in.offset;
+
+			auto at = [&state](size_t x, size_t y) -> auto& {
+				return state.out.canvas[y * state.in.width + x];
+			};
+
+			/* setup */
+			const int width = state.in.width, height = state.in.height;
+
+			// image
+			oreal aspect_ratio = state.in.width / oreal(state.in.height);
+
+			// camera
+			oreal focal_length = 1.0;
+			oreal viewport_height = 2.0;
+			oreal viewport_width = viewport_height * aspect_ratio;
+			ovec3 camera_center(0, 0, 0);
+
+			// viewport specific
+			ovec3 viewport_u(viewport_width, 0, 0);
+			ovec3 viewport_v(0, -viewport_height, 0);
+
+			// calculate the horizontal and vertical delta vectors from pixel to pixel.
+			auto pixel_delta_u = viewport_u / oreal(width);
+			auto pixel_delta_v = viewport_v / oreal(height);
+
+			// calculate the location of the upper left pixel.
+			auto viewport_upper_left = camera_center - ovec3(0, 0, focal_length) - viewport_u / oreal(2) - viewport_v / oreal(2);
+			auto pixel00_loc = viewport_upper_left + oreal(0.5) * (pixel_delta_u + pixel_delta_v);
+
+			// functions
+			auto color_u32 = [](ovec3 incolor) -> uint32_t {
+				incolor = glm::clamp(incolor, ovec3(0, 0, 0), ovec3(1, 1, 1));
+				return uint32_t(incolor.r * 255) << 16 | uint32_t(incolor.g * 255) << 8 | uint32_t(incolor.b * 255);
+			};
+
+			auto hit_sphere = [&](ovec3 const& center, oreal radius, Ray const& r) -> bool {
+				ovec3 oc = center - r.origin();
+				auto a = glm::dot(r.direction(), r.direction());
+				auto b = oreal(-2.0) * glm::dot(r.direction(), oc);
+				auto c = glm::dot(oc, oc) - radius * radius;
+				auto discriminant = b * b - 4 * a * c;
+				return discriminant >= 0;
+			};
+
+			auto ray_color = [&](Ray const& r) -> auto {
+				ovec3 color;
+
+				if (hit_sphere(ovec3(offset.x, offset.y, -1 + offset.z), oreal(0.5), r)) {
+					return color_u32(ovec3(1, 0, 0));
+				}
+
+				auto unit_direction = r.direction();
+				oreal a = oreal(0.5) * (unit_direction.y + oreal(1.0));
+				color = (oreal(1.0) - a) * ovec3(1, 1, 1) + a * ovec3(0.5, 0.7, 1.0);
+
+				return color_u32(color);
+			};
+			
+			/* actual work */
+			auto begin = std::chrono::high_resolution_clock::now();
+
+			for (int j=0; j < height and not state.in.kill; j++)
+			{
+				for (int i=0; i < width; i++)
+				{
+					auto pixel_center = pixel00_loc + (oreal(i) * pixel_delta_u) + (oreal(j) * pixel_delta_v);
+					auto ray_direction = pixel_center - camera_center;
+					Ray r(camera_center, ray_direction);
+
+					uint32_t color = ray_color(r);
+					at(i, j) = color;
+				}
+
+				state.out.percentage = j / float(height-1);
+
+				if (state.in.kill or state.inout.stop) break;
+			}
+
+			auto end = std::chrono::high_resolution_clock::now();
+			state.out.time = end - begin;
+			
+			state.out.finished = true;
+
+			if (state.in.kill) break;
+		}
     }
 
     void draw(struct buffer* buffer, float delta_time)
     {
         auto& cr = *buffer->cairo.context;
+		[[maybe_unused]] auto& pg = *buffer->pango.layout;
         [[maybe_unused]] auto& crs = *buffer->cairo.surface;
 
         cr.save();
-
+        
+        cr.translate(-width / 2.0, height / 2.0);
+        cr.scale(1, -1);
+        
         cr.set_source_rgb(0, 0, 0);
         cr.paint();
+        
+        cr.set_source_rgb(1, 1, 1);
+        cr.move_to(50, 50);
+
+        const size_t size = std::min(buffer->shm_size, worker.out.canvas.size() * sizeof(uint32_t));
+        memcpy(buffer->shm_data_u32, worker.out.canvas.data(), size);
+
+		static std::string str;
+        if (worker.out.finished) {
+			str = std::format("Took {:.3f}s", worker.out.time.count() / 1e9f);
+        } else {
+			static auto last_time = -100.f;
+			if (elapsed_time >= last_time + 0.1f) {
+				str = std::format("{:.2f}%", worker.out.percentage * 100.f);
+				last_time = elapsed_time;
+			}
+        }
+		pg.set_text(str);
+		pg.show_in_cairo_context(buffer->cairo.context);
 
         cr.restore();
     }
+
+	void on_create_buffer(struct buffer* buffer)
+	{
+		static Pango::FontDescription desc;
+
+		auto& pg = *buffer->pango.layout;
+		desc = Pango::FontDescription("Ubuntu 20");
+		pg.set_font_description(desc);
+	}
 
 private: /* Helpers */
     void pixel_range2(struct buffer* buffer, int x, int y, int ex, int ey, uint32_t color)
@@ -365,6 +611,8 @@ private: /* Helpers */
             auto& cr = *buffer->cairo.context;
             cr.translate(width / 2.0, height / 2.0);
             cr.scale(1, -1);
+
+			on_create_buffer(buffer);
         }
 
         return buffer;
@@ -393,8 +641,10 @@ private: /* Helpers */
         wl_shm_pool_destroy(pool);
         close(fd);
 
-        buffer->cairo.surface = Cairo::ImageSurface::create((unsigned char*)data, cr_format, width, height, stride);
-        buffer->cairo.context = Cairo::Context::create(buffer->cairo.surface);
+        iassert(buffer->cairo.surface = Cairo::ImageSurface::create((unsigned char*)data, cr_format, width, height, stride));
+        iassert(buffer->cairo.context = Cairo::Context::create(buffer->cairo.surface));
+
+		iassert(buffer->pango.layout = Pango::Layout::create(buffer->cairo.context));
     }
 
     int create_anonymous_file(size_t size)
@@ -658,13 +908,16 @@ public: /* section: listeners */
         auto& xkb = keyboard.xkb;
 
         const auto scancode = key + 8;
+		const auto keystate = static_cast<wl_keyboard_key_state>(state);
 
         auto sym = xkb_state_key_get_one_sym(xkb.state, scancode);
         if (sym != XKB_KEY_NoSymbol)
-            keyboard.map[sym] = static_cast<wl_keyboard_key_state>(state);
+            keyboard.map[sym] = keystate;
         
         auto u32 = static_cast<char32_t>(xkb_state_key_get_utf32(xkb.state, scancode));
-        keyboard.map_utf[u32] = static_cast<wl_keyboard_key_state>(state);
+        keyboard.map_utf[u32] = keystate;
+
+		app->on_key(sym, keystate);
     }
     static void on_keyboard_modifiers(void* data, wl_keyboard* keyboard, uint32_t serial, uint32_t mods_depressed, uint32_t mods_latched, uint32_t mods_locked, uint32_t group)
     {

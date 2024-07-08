@@ -14,9 +14,10 @@ dep_egl = dependency('egl')
 
 dep_xkbcommon = dependency('xkbcommon')
 dep_cairomm = dependency('cairomm-1.16')
+dep_pangomm = dependency('pangomm-2.48')
 dep_spdlog = dependency('spdlog')
 
-deps_shm = [dep_spdlog, dep_wl, dep_wl_xdg_shell, dep_xkbcommon, dep_cairomm]
+deps_shm = [dep_spdlog, dep_wl, dep_wl_xdg_shell, dep_xkbcommon, dep_cairomm, dep_pangomm]
 
 common_pch = 'inc/pch/pch.hpp'
 
@@ -29,4 +30,4 @@ executable('pendulum', 'src/pendulum/main.cpp', include_directories: inc, depend
 executable('two-pendulum', 'src/two-pendulum/main.cpp', include_directories: inc, dependencies: deps_shm)
 executable('cloth-new', 'src/cloth-new/main.cpp', include_directories: inc, dependencies: deps_shm)
 executable('graph', 'src/graph/main.cpp', include_directories: inc, dependencies: deps_shm, cpp_pch: common_pch)	
-executable('raytracer', 'src/raytracer/main.cpp', include_directories: inc, dependencies: deps_shm, cpp_pch: common_pch)	
+executable('raytracer', 'src/raytracer/main.cpp', include_directories: inc, dependencies: deps_shm, cpp_pch: 'inc/raytracer/pch.hpp')
