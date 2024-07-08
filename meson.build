@@ -18,6 +18,8 @@ dep_spdlog = dependency('spdlog')
 
 deps_shm = [dep_spdlog, dep_wl, dep_wl_xdg_shell, dep_xkbcommon, dep_cairomm]
 
+common_pch = 'inc/pch/pch.hpp'
+
 executable('window', 'src/window/window.cpp', include_directories: inc, dependencies: deps_shm)
 executable('window-lamp', 'src/window-lamp/window.cpp', include_directories: inc, dependencies: deps_shm)
 executable('heart', 'src/heart/heart.cpp', include_directories: inc, dependencies: deps_shm)
@@ -26,4 +28,5 @@ executable('cloth', 'src/cloth/cloth.cpp', include_directories: inc, dependencie
 executable('pendulum', 'src/pendulum/main.cpp', include_directories: inc, dependencies: deps_shm)
 executable('two-pendulum', 'src/two-pendulum/main.cpp', include_directories: inc, dependencies: deps_shm)
 executable('cloth-new', 'src/cloth-new/main.cpp', include_directories: inc, dependencies: deps_shm)
-executable('graph', 'src/graph/main.cpp', include_directories: inc, dependencies: deps_shm, cpp_pch: 'inc/pch/pch.hpp')	
+executable('graph', 'src/graph/main.cpp', include_directories: inc, dependencies: deps_shm, cpp_pch: common_pch)	
+executable('raytracer', 'src/raytracer/main.cpp', include_directories: inc, dependencies: deps_shm, cpp_pch: common_pch)	
