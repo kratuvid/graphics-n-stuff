@@ -1,5 +1,8 @@
+.cache/
 build/
+build-release/
 build_release/
-a.out
 inc/wayland/
 src/wayland/
+
+a.out
