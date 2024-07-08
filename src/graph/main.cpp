@@ -1,16 +1,4 @@
-#include <chrono>
-#include <exception>
-#include <print>
-#include <source_location>
-#include <string_view>
-
-#include <fcntl.h>
-#include <sys/mman.h>
-
-#include <spdlog/spdlog.h>
-
-#include "wayland/xdg-shell.h"
-#include <wayland-client.h>
+#include "pch/pch.hpp"
 
 #ifndef DISABLE_IASSERT
 #define iassert(expr, ...) \
@@ -21,21 +9,6 @@
     if (!(expr))           \
         ;
 #endif
-
-#include <linux/input-event-codes.h>
-#include <xkbcommon/xkbcommon.h>
-
-#include <sys/resource.h>
-
-#include <unordered_map>
-
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/glm.hpp>
-#include <glm/gtc/random.hpp>
-#include <glm/gtx/norm.hpp>
-#include <glm/gtx/vector_angle.hpp>
-
-#include <cairomm/cairomm.h>
 
 class App {
 private: /* section: variables */
@@ -323,35 +296,52 @@ private: /* Meat: functions */
 
             static glm::vec2 offset {};
             const float offset_rate = kb.map[XKB_KEY_Shift_L] ? 200 : 100;
-            if (kb.map[XKB_KEY_d]) offset.x += offset_rate * delta_time;
-            if (kb.map[XKB_KEY_a]) offset.x -= offset_rate * delta_time;
-            if (kb.map[XKB_KEY_w]) offset.y += offset_rate * delta_time;
-            if (kb.map[XKB_KEY_s]) offset.y -= offset_rate * delta_time;
+            if (kb.map[XKB_KEY_d])
+                offset.x += offset_rate * delta_time;
+            if (kb.map[XKB_KEY_a])
+                offset.x -= offset_rate * delta_time;
+            if (kb.map[XKB_KEY_w])
+                offset.y += offset_rate * delta_time;
+            if (kb.map[XKB_KEY_s])
+                offset.y -= offset_rate * delta_time;
 
-            static glm::vec2 scale {1, 1};
+            static glm::vec2 scale { 1, 1 };
             const float scale_rate = kb.map[XKB_KEY_Shift_L] ? 20 : 10;
-            if (kb.map[XKB_KEY_equal]) scale.x += scale_rate * delta_time;
-            if (kb.map[XKB_KEY_minus]) scale.x -= scale_rate * delta_time;
-            if (kb.map[XKB_KEY_plus]) scale.y += scale_rate * delta_time;
-            if (kb.map[XKB_KEY_underscore]) scale.y -= scale_rate * delta_time;
+            if (kb.map[XKB_KEY_equal])
+                scale.x += scale_rate * delta_time;
+            if (kb.map[XKB_KEY_minus])
+                scale.x -= scale_rate * delta_time;
+            if (kb.map[XKB_KEY_plus])
+                scale.y += scale_rate * delta_time;
+            if (kb.map[XKB_KEY_underscore])
+                scale.y -= scale_rate * delta_time;
             scale.x = std::clamp(scale.x, 0.f, 500.f);
             scale.y = std::clamp(scale.y, 0.f, 500.f);
-            
-            if (kb.map[XKB_KEY_r]) offset = glm::vec2();
-            if (kb.map[XKB_KEY_R]) scale = glm::vec2(1, 1);
-            
+
+            if (kb.map[XKB_KEY_r])
+                offset = glm::vec2();
+            if (kb.map[XKB_KEY_R])
+                scale = glm::vec2(1, 1);
+
             auto get_x = [&](float x) -> float {
                 x *= scale.x;
                 x += offset.y;
                 return x;
             };
+            auto get_y = [&](float y) -> float {
+                y *= scale.y;
+                y += offset.y;
+                return y;
+            };
 
             const float var = 0.f + glm::abs(glm::sin(elapsed_time * 1 * M_PI)) * 100.f;
             auto f = [&](float x) -> float {
                 x = get_x(x);
-                float f_x = glm::sin(x);
-                f_x *= scale.y;
-                f_x += offset.y;
+
+                // put the expression here
+                float f_x = glm::tan(x / 1695) * 10.f;
+
+                f_x = get_y(f_x);
                 return f_x;
             };
 
