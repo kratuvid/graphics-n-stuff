@@ -37,6 +37,7 @@ private: /* section: variables */
                 xkb_state* state;
             } xkb;
             std::unordered_map<xkb_keysym_t, wl_keyboard_key_state> map;
+            std::unordered_map<char32_t, wl_keyboard_key_state> map_utf;
         } keyboard;
     } input {};
 
@@ -262,12 +263,8 @@ private: /* Meat: variables */
 private: /* Meat: functions */
     void setup_pre()
     {
-        for (auto sym : {
-                 XKB_KEY_equal, XKB_KEY_minus,
-                 XKB_KEY_plus, XKB_KEY_underscore,
-                 XKB_KEY_e,
-                 XKB_KEY_w, XKB_KEY_a, XKB_KEY_s, XKB_KEY_d })
-            input.keyboard.map.insert({ sym, WL_KEYBOARD_KEY_STATE_RELEASED });
+        for (char32_t u32 : {'=', '-', '+', '_', 'w', 's', 'd', 'a', 'e'})
+            input.keyboard.map_utf.insert({ u32, WL_KEYBOARD_KEY_STATE_RELEASED });
     }
 
     void setup()
@@ -283,8 +280,6 @@ private: /* Meat: functions */
         auto& cr = *buffer->cairo.context;
         [[maybe_unused]] auto& crs = *buffer->cairo.surface;
 
-        // const auto& cpos = input.pointer.cpos;
-
         cr.save();
 
         cr.set_source_rgb(0, 0, 0);
@@ -296,31 +291,31 @@ private: /* Meat: functions */
 
             static glm::vec2 offset {};
             const float offset_rate = kb.map[XKB_KEY_Shift_L] ? 200 : 100;
-            if (kb.map[XKB_KEY_d])
+            if (kb.map_utf['d'])
                 offset.x += offset_rate * delta_time;
-            if (kb.map[XKB_KEY_a])
+            if (kb.map_utf['a'])
                 offset.x -= offset_rate * delta_time;
-            if (kb.map[XKB_KEY_w])
+            if (kb.map_utf['w'])
                 offset.y += offset_rate * delta_time;
-            if (kb.map[XKB_KEY_s])
+            if (kb.map_utf['s'])
                 offset.y -= offset_rate * delta_time;
 
             static glm::vec2 scale { 1, 1 };
             const float scale_rate = kb.map[XKB_KEY_Shift_L] ? 20 : 10;
-            if (kb.map[XKB_KEY_equal])
+            if (kb.map_utf['='])
                 scale.x += scale_rate * delta_time;
-            if (kb.map[XKB_KEY_minus])
+            if (kb.map_utf['-'])
                 scale.x -= scale_rate * delta_time;
-            if (kb.map[XKB_KEY_plus])
+            if (kb.map_utf['+'])
                 scale.y += scale_rate * delta_time;
-            if (kb.map[XKB_KEY_underscore])
+            if (kb.map_utf['_'])
                 scale.y -= scale_rate * delta_time;
             scale.x = std::clamp(scale.x, 0.f, 500.f);
             scale.y = std::clamp(scale.y, 0.f, 500.f);
 
-            if (kb.map[XKB_KEY_r])
+            if (kb.map_utf['r'])
                 offset = glm::vec2();
-            if (kb.map[XKB_KEY_R])
+            if (kb.map_utf['R'])
                 scale = glm::vec2(1, 1);
 
             auto get_x = [&](float x) -> float {
@@ -339,7 +334,7 @@ private: /* Meat: functions */
                 x = get_x(x);
 
                 // put the expression here
-                float f_x = glm::tan(x / 1695) * 10.f;
+                float f_x = glm::exp(x / 1700);
 
                 f_x = get_y(f_x);
                 return f_x;
@@ -356,7 +351,7 @@ private: /* Meat: functions */
             const float f_min = f(min), f_max = f(max);
             const float dx = 1.1f;
 
-            if (kb.map[XKB_KEY_e]) {
+            if (kb.map_utf['e']) {
                 spdlog::debug("Extent: f({}) -> f({}) = {} -> {}", get_x(min), get_x(max), f_min, f_max);
             }
 
@@ -754,20 +749,12 @@ public: /* section: listeners */
 
         const auto scancode = key + 8;
 
-        /*
         auto sym = xkb_state_key_get_one_sym(xkb.state, scancode);
-        if (sym == XKB_KEY_A)
-                spdlog::debug("A!");
-        */
-
-        const xkb_keysym_t* syms;
-        int num_syms = xkb_state_key_get_syms(xkb.state, scancode, &syms);
-        if (num_syms > 0) {
-            for (int i = 0; i < num_syms; i++) {
-                const auto sym = syms[i];
-                keyboard.map[sym] = (wl_keyboard_key_state)state;
-            }
-        }
+        if (sym != XKB_KEY_NoSymbol)
+            keyboard.map[sym] = static_cast<wl_keyboard_key_state>(state);
+        
+        auto u32 = static_cast<char32_t>(xkb_state_key_get_utf32(xkb.state, scancode));
+        keyboard.map_utf[u32] = static_cast<wl_keyboard_key_state>(state);
     }
     static void on_keyboard_modifiers(void* data, wl_keyboard* keyboard, uint32_t serial, uint32_t mods_depressed, uint32_t mods_latched, uint32_t mods_locked, uint32_t group)
     {
