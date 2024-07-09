@@ -1,8 +1,5 @@
 #include "raytracer/pch.hpp"
 
-#include <thread>
-#include <semaphore>
-
 #include "raytracer/types.hpp"
 #include "raytracer/ray.hpp"
 
@@ -463,7 +460,7 @@ private: /* Meat: functions */
 			/* actual work */
 			auto begin = std::chrono::high_resolution_clock::now();
 
-			for (int j=0; j < height and not state.in.kill; j++)
+			for (int j=0; j < height; j++)
 			{
 				for (int i=0; i < width; i++)
 				{
@@ -668,7 +665,7 @@ private: /* Helpers */
 
     Cairo::Surface::Format shm_to_cairo_format(uint32_t shm_format)
     {
-        Cairo::Surface::Format cr_format;
+        auto cr_format = static_cast<Cairo::Surface::Format>(0);
         switch (shm_format) {
         case WL_SHM_FORMAT_XRGB8888:
             cr_format = Cairo::Surface::Format::RGB24;
