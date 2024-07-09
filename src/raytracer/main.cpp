@@ -328,8 +328,6 @@ private: /* Meat: variables */
 private: /* Meat: functions */
     void setup_pre()
     {
-        for (char32_t u32 : {0})
-            input.keyboard.map_utf.insert({ u32, WL_KEYBOARD_KEY_STATE_RELEASED });
     }
 
     void setup()
@@ -355,6 +353,40 @@ private: /* Meat: functions */
 			last_dimens[0] = width; last_dimens[1] = height;
 			render_again = false;
 		}
+
+		/*
+		const float in = elapsed_time * 2 * M_PIf * 0.1f;
+		const ovec2 disp(1, 1);
+		worker.in.offset.x = glm::cos(in) * disp.x;
+		worker.in.offset.y = glm::sin(in) * disp.y;
+		render_again = true;
+		*/
+
+		const float delta = 0.5 * delta_time;
+		auto& map = input.keyboard.map_utf;
+
+		if (map['w']) {
+			worker.in.offset.y += delta;
+			render_again = true;
+		} if (map['s']) {
+			worker.in.offset.y -= delta;
+			render_again = true;
+		} if (map['d']) {
+			worker.in.offset.x += delta;
+			render_again = true;
+		} if (map['a']) {
+			worker.in.offset.x -= delta;
+			render_again = true;
+		} if (map['e']) {
+			worker.in.offset.z -= delta;
+			render_again = true;
+		} if (map['q']) {
+			worker.in.offset.z += delta;
+			render_again = true;
+		}
+
+		if (render_again)
+			worker.in.offset = glm::clamp(worker.in.offset, ovec3(-1, -1, -1), ovec3(1, 1, 1));
     }
 
 	void on_key(xkb_keysym_t sym, wl_keyboard_key_state state)
@@ -363,27 +395,10 @@ private: /* Meat: functions */
 		{
 			switch (sym)
 			{
-			case XKB_KEY_w: worker.in.offset.y += 0.1;
-				render_again = true;
-				break;
-			case XKB_KEY_s: worker.in.offset.y -= 0.1;
-				render_again = true;
-				break;
-			case XKB_KEY_d: worker.in.offset.x += 0.1;
-				render_again = true;
-				break;
-			case XKB_KEY_a: worker.in.offset.x -= 0.1;
-				render_again = true;
-				break;
-			case XKB_KEY_e: worker.in.offset.z -= 0.1;
-				render_again = true;
-				break;
-			case XKB_KEY_q: worker.in.offset.z += 0.1;
+			case XKB_KEY_space:
 				render_again = true;
 				break;
 			}
-
-			worker.in.offset = glm::clamp(worker.in.offset, ovec3(-1, -1, -1), ovec3(1, 1, 1));
 		}
 	}
     
@@ -398,7 +413,7 @@ private: /* Meat: functions */
 			state.inout.stop = false;
 			state.out.finished = false;
 
-			auto offset = state.in.offset;
+			const auto& offset = state.in.offset;
 
 			auto at = [&state](size_t x, size_t y) -> auto& {
 				return state.out.canvas[y * state.in.width + x];
@@ -434,20 +449,28 @@ private: /* Meat: functions */
 				return uint32_t(incolor.r * 255) << 16 | uint32_t(incolor.g * 255) << 8 | uint32_t(incolor.b * 255);
 			};
 
-			auto hit_sphere = [&](ovec3 const& center, oreal radius, Ray const& r) -> bool {
+			auto hit_sphere = [&](ovec3 const& center, oreal radius, Ray const& r) -> oreal {
 				ovec3 oc = center - r.origin();
 				auto a = glm::dot(r.direction(), r.direction());
 				auto b = oreal(-2.0) * glm::dot(r.direction(), oc);
 				auto c = glm::dot(oc, oc) - radius * radius;
 				auto discriminant = b * b - 4 * a * c;
-				return discriminant >= 0;
+
+				if (discriminant < 0) {
+					return -1.0;
+				} else {
+					return (-b - glm::sqrt(discriminant)) / (oreal(2.0) * a);
+				}
 			};
 
 			auto ray_color = [&](Ray const& r) -> auto {
 				ovec3 color;
 
-				if (hit_sphere(ovec3(offset.x, offset.y, -1 + offset.z), oreal(0.5), r)) {
-					return color_u32(ovec3(1, 0, 0));
+				const ovec3 pos(offset.x, offset.y, -1 + offset.z);
+				oreal t = hit_sphere(pos, oreal(0.5), r);
+				if (t > oreal(0.0)) {
+					ovec3 N = glm::normalize(r.at(t) - pos);
+					return color_u32(oreal(0.5) * (N + oreal(1.0)));
 				}
 
 				auto unit_direction = r.direction();
