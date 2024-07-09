@@ -412,6 +412,7 @@ private: /* Meat: functions */
 			
 			state.inout.stop = false;
 			state.out.finished = false;
+			state.out.percentage = 0.f;
 
 			const auto& offset = state.in.offset;
 
@@ -451,15 +452,15 @@ private: /* Meat: functions */
 
 			auto hit_sphere = [&](ovec3 const& center, oreal radius, Ray const& r) -> oreal {
 				ovec3 oc = center - r.origin();
-				auto a = glm::dot(r.direction(), r.direction());
-				auto b = oreal(-2.0) * glm::dot(r.direction(), oc);
-				auto c = glm::dot(oc, oc) - radius * radius;
-				auto discriminant = b * b - 4 * a * c;
+				auto a = glm::length2(r.direction());
+				auto h = glm::dot(r.direction(), oc);
+				auto c = glm::length2(oc) - radius * radius;
+				auto discriminant = h * h - a * c;
 
 				if (discriminant < 0) {
 					return -1.0;
 				} else {
-					return (-b - glm::sqrt(discriminant)) / (oreal(2.0) * a);
+					return (h - glm::sqrt(discriminant)) / a;
 				}
 			};
 

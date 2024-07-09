@@ -1,12 +1,14 @@
 // system headers
 #include <chrono>
 #include <exception>
+#include <memory>
 #include <print>
 #include <semaphore>
 #include <source_location>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include <fcntl.h>
 #include <linux/input-event-codes.h>
