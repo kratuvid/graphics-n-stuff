@@ -532,7 +532,7 @@ private: /* Meat: functions */
 
 		static std::string str;
         if (worker.out.finished) {
-			str = std::format("Took {:.3f}s", worker.out.time.count() / 1e9f);
+			str = std::format("Took {:.3e}s", worker.out.time.count() / 1e9f);
         } else {
 			static auto last_time = -100.f;
 			if (elapsed_time >= last_time + 0.1f) {
