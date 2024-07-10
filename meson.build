@@ -34,3 +34,4 @@ executable('two-pendulum', 'src/two-pendulum/main.cpp', include_directories: inc
 executable('cloth-new', 'src/cloth-new/main.cpp', include_directories: inc, dependencies: deps_shm)
 executable('graph', 'src/graph/main.cpp', include_directories: inc, dependencies: deps_shm, cpp_pch: common_pch)	
 executable('raytracer', 'src/raytracer/main.cpp', include_directories: inc, dependencies: deps_shm, cpp_pch: 'inc/raytracer/pch.hpp')
+executable('pong', 'src/pong/main.cpp', include_directories: inc, dependencies: deps_shm , cpp_pch: common_pch)
