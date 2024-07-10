@@ -35,3 +35,4 @@ executable('cloth-new', 'src/cloth-new/main.cpp', include_directories: inc, depe
 executable('graph', 'src/graph/main.cpp', include_directories: inc, dependencies: deps_shm, cpp_pch: common_pch)	
 executable('raytracer', 'src/raytracer/main.cpp', include_directories: inc, dependencies: deps_shm, cpp_pch: 'inc/raytracer/pch.hpp')
 executable('pong', 'src/pong/main.cpp', include_directories: inc, dependencies: deps_shm , cpp_pch: common_pch)
+executable('ttt', 'src/ttt/main.cpp', include_directories: inc, dependencies: deps_shm , cpp_pch: common_pch)
