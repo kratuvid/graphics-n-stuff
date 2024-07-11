@@ -8,19 +8,25 @@ endif
 
 inc = include_directories('inc')
 
-lib_wl_xdg_shell = static_library('wl_xdg_shell', 'src/wayland/xdg-shell.c', include_directories: inc)
-dep_wl_xdg_shell = declare_dependency(link_with: lib_wl_xdg_shell, include_directories: inc)
+libs = {
+  'wl-xdg-shell': static_library('wl_xdg_shell', 'src/wayland/xdg-shell.c', include_directories: inc)
+}
 
-dep_wl = dependency('wayland-client')
-dep_wl_egl = dependency('wayland-egl')
-dep_egl = dependency('egl')
+deps = {
+  # internal
+  'wl-xdg-shell': declare_dependency(link_with: libs['wl-xdg-shell'], include_directories: inc),
 
-dep_xkbcommon = dependency('xkbcommon')
-dep_cairomm = dependency('cairomm-1.16')
-dep_pangomm = dependency('pangomm-2.48')
-dep_spdlog = dependency('spdlog')
+  # external
+  'wl': dependency('wayland-client'),
+  'wl-egl': dependency('wayland-egl'),
+  'egl': dependency('egl'),
+  'xkbcommon': dependency('xkbcommon'),
+  'cairomm': dependency('cairomm-1.16'),
+  'pangomm': dependency('pangomm-2.48'),
+  'spdlog': dependency('spdlog')
+}
 
-deps_shm = [dep_spdlog, dep_wl, dep_wl_xdg_shell, dep_xkbcommon, dep_cairomm, dep_pangomm]
+deps_shm = [deps['spdlog'], deps['wl'], deps['wl-xdg-shell'], deps['xkbcommon'], deps['cairomm'], deps['pangomm']]
 
 common_pch = 'inc/pch/pch.hpp'
 
