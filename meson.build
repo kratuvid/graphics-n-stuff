@@ -18,8 +18,7 @@ deps = {
 
   # external
   'wl': dependency('wayland-client'),
-  'wl-egl': dependency('wayland-egl'),
-  'egl': dependency('egl'),
+  'wl-egl': dependency('wayland-egl'), 'egl': dependency('egl'),
   'xkbcommon': dependency('xkbcommon'),
   'cairomm': dependency('cairomm-1.16'),
   'pangomm': dependency('pangomm-2.48'),
@@ -43,3 +42,4 @@ executable('raytracer', 'src/raytracer/main.cpp', include_directories: inc, depe
 executable('pong', 'src/pong/main.cpp', include_directories: inc, dependencies: deps_shm , cpp_pch: common_pch)
 executable('ttt', 'src/ttt/main.cpp', include_directories: inc, dependencies: deps_shm , cpp_pch: common_pch)
 executable('raytracer-new', 'src/raytracer-new/main.cpp', include_directories: inc, dependencies: deps_shm , cpp_pch: 'inc/raytracer-new/pch.hpp')
+executable('fractal', 'src/fractal/main.cpp', include_directories: inc, dependencies: deps_shm , cpp_pch: 'inc/fractal/pch.hpp')
