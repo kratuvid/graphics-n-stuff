@@ -252,14 +252,14 @@ private:
 		const int range_size = height / thread_manager.num_threads();
 		const int range_size_left = height % thread_manager.num_threads();
 
-		in_per.resize(
-			(range_size == 0 ? 0 : thread_manager.num_threads())
-			+ (range_size_left == 0 ? 0 : 1)
-		);
+		in_per.resize(range_size == 0 ? 1 : thread_manager.num_threads());
 
 		unsigned next_index = 0;
-		for (int row = 0; row < height; row += range_size, next_index++)
-		{
+		for (
+			int row = 0;
+			next_index < in_per.size() and range_size != 0;
+			row += range_size, next_index++
+		) {
 			auto& ip = in_per[next_index];
 			ip.row_start = row;
 			ip.row_end = row + range_size - 1;
@@ -304,7 +304,7 @@ private:
 private:
 	void on_create_buffer(Buffer* buffer) override
 	{
-		if ((in_shared.width != width or in_shared.height != height) and out.canvas.size() != 0)
+		if (in_shared.width != width or in_shared.height != height)
 		{
 			resize();
 		}
