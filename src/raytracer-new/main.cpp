@@ -117,13 +117,19 @@ public:
 
 		// Signalling
 		stop = true;
-		for (unsigned _ : std::views::iota(0u, nthreads))
-			release();
+		release(nthreads);
 
 		// Waiting
 		std::println(stderr, "Waiting for {} threads to quit...", nthreads);
+		for (unsigned i : std::views::iota(0u, nthreads))
+		{
+			work_state[i].lock();
+			work_state[i].unlock();
+		}
 		for (auto& thread : workers)
+		{
 			thread.join();
+		}
 
 		// Statistics
 		const auto total_work_done = std::accumulate(work_done.begin(), work_done.end(), 0);
@@ -172,10 +178,17 @@ private:
 			auto index = at_begin;
 			for (int row = cmd.in_per->row_start; row <= cmd.in_per->row_end; row++)
 			{
-				for (int col = 0; col < width; col++, index++)
+				int count = 3000;
+				for (int x=0; x < count; x++)
 				{
-					uint32_t color = color_u32(cmd.in_per->color);
-					cmd.out->canvas[index] = color;
+					auto prev_index = index;
+					for (int col = 0; col < width; col++, index++)
+					{
+						uint32_t color = color_u32(cmd.in_per->color);
+						cmd.out->canvas[index] = color;
+					}
+					if (x != count-1)
+						index = prev_index;
 				}
 
 				if (mgr->stop) break;
@@ -211,14 +224,14 @@ class Raytracer : public App
 		std::vector<uint32_t> canvas;
 	};
 
+	InShared in_shared;
+	std::vector<InPer> in_per;
+	Out out;
+
 	ThreadManager<Raytracer, InShared, InPer, Out> thread_manager;
 
 	using CommandType = decltype(thread_manager)::CommandType;
 	using Command = decltype(thread_manager)::Command;
-
-	InShared in_shared;
-	std::vector<InPer> in_per;
-	Out out;
 	
 public:
 	Raytracer()
@@ -312,6 +325,11 @@ private:
 
 	void on_key(xkb_keysym_t key, wl_keyboard_key_state state) override
 	{
+		if (key == XKB_KEY_space and state == WL_KEYBOARD_KEY_STATE_RELEASED)
+		{
+			thread_manager.halt();
+			distribute();
+		}
 	}
 };
 
