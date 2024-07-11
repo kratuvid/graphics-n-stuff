@@ -36,3 +36,4 @@ executable('graph', 'src/graph/main.cpp', include_directories: inc, dependencies
 executable('raytracer', 'src/raytracer/main.cpp', include_directories: inc, dependencies: deps_shm, cpp_pch: 'inc/raytracer/pch.hpp')
 executable('pong', 'src/pong/main.cpp', include_directories: inc, dependencies: deps_shm , cpp_pch: common_pch)
 executable('ttt', 'src/ttt/main.cpp', include_directories: inc, dependencies: deps_shm , cpp_pch: common_pch)
+executable('raytracer-new', 'src/raytracer-new/main.cpp', include_directories: inc, dependencies: deps_shm , cpp_pch: 'inc/raytracer-new/pch.hpp')
