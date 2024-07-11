@@ -15,7 +15,7 @@
 
 class App
 {
-private: /* variables */
+protected: /* variables */
     // wayland
     struct
     {
@@ -54,7 +54,7 @@ private: /* variables */
         wl_callback* callback;
     } window {};
 
-    struct buffer {
+    struct Buffer {
         wl_buffer* buffer;
         bool busy;
         union {
@@ -87,10 +87,9 @@ private: /* variables */
     std::chrono::nanoseconds duration_pause { 0 };
     bool last_window_activated = false;
 
-	Cairo::Matrix initial_cairo_transform;
+	Cairo::Matrix initial_cairo_transform, initial_cairo_inverse_transform;
     // END - internal state
 	
-protected:
 	// configurable
     std::string_view title {"App!"};
     unsigned substeps = 1;
@@ -296,7 +295,7 @@ private: /* internal redraw */
 
 private: /* meat: variables */
 
-private: /* meat: functions */
+protected: /* meat: functions */
     virtual void setup_pre()
     {
     }
@@ -313,7 +312,7 @@ private: /* meat: functions */
     {
     }
 
-    virtual void draw(struct buffer* buffer, float delta_time)
+    virtual void draw(Buffer* buffer, float delta_time)
     {
         auto& cr = *buffer->cairo.context;
 		[[maybe_unused]] auto& pg = *buffer->pango.layout;
@@ -327,7 +326,7 @@ private: /* meat: functions */
         cr.restore();
     }
 
-private: /* events */
+protected: /* events */
 	virtual void on_click(uint32_t button, uint32_t state)
 	{
 	}
@@ -336,23 +335,23 @@ private: /* events */
 	{
 	}
 
-	virtual void on_create_buffer_pre(struct buffer* buffer)
+	virtual void on_create_buffer_pre(Buffer* buffer)
 	{
 	}
 
-	virtual void on_create_buffer(struct buffer* buffer)
+	virtual void on_create_buffer(Buffer* buffer)
 	{
 	}
 
-private: /* low-level helpers */
-    void pixel_range2(struct buffer* buffer, int x, int y, int ex, int ey, uint32_t color)
+protected: /* low-level helpers */
+    void pixel_range2(Buffer* buffer, int x, int y, int ex, int ey, uint32_t color)
     {
         centered(x, y);
         centered(ex, ey);
         pixel_range(buffer, x, y, ex, ey, color);
     }
 
-    void pixel_range(struct buffer* buffer, int x, int y, int ex, int ey, uint32_t color)
+    void pixel_range(Buffer* buffer, int x, int y, int ex, int ey, uint32_t color)
     {
         x = std::clamp(x, 0, width - 1);
         y = std::clamp(y, 0, height - 1);
@@ -363,13 +362,13 @@ private: /* low-level helpers */
             std::fill(&buffer->shm_data_u32[location], &buffer->shm_data_u32[location_end], color);
     }
 
-    uint32_t& pixel_at2(struct buffer* buffer, int x, int y)
+    uint32_t& pixel_at2(Buffer* buffer, int x, int y)
     {
         centered(x, y);
         return pixel_at(buffer, x, y);
     }
 
-    uint32_t& pixel_at(struct buffer* buffer, int x, int y)
+    uint32_t& pixel_at(Buffer* buffer, int x, int y)
     {
         static uint32_t facade;
         if ((x < 0 or x >= width) or (y < 0 or y >= height)) {
@@ -382,16 +381,16 @@ private: /* low-level helpers */
 
     void uncentered(int& x, int& y)
     {
-        x -= width / 2;
-        y = -y;
-        y += height / 2;
+		double _x = x, _y = y;
+		initial_cairo_inverse_transform.transform_point(_x, _y);
+		x = _x; y = _y;
     }
 
     void centered(int& x, int& y)
     {
-        x += width / 2;
-        y -= height / 2;
-        y = -y;
+		double _x = x, _y = y;
+		initial_cairo_transform.transform_point(_x, _y);
+		x = _x; y = _y;
     }
 
     ssize_t at(int x, int y)
@@ -399,9 +398,10 @@ private: /* low-level helpers */
         return (y * width) + x;
     }
 
-    struct buffer* next_buffer()
+private: // buffer management
+    Buffer* next_buffer()
     {
-        struct buffer* buffer = nullptr;
+        Buffer* buffer = nullptr;
 
         for (auto& one : buffers) {
             if (!one.busy) {
@@ -426,8 +426,9 @@ private: /* low-level helpers */
 			initial_cairo_transform = Cairo::translation_matrix(initial_cairo_translate.x, initial_cairo_translate.y);
 			initial_cairo_transform.scale(initial_cairo_scale.x, initial_cairo_scale.y);
 			cr.set_matrix(initial_cairo_transform);
+			initial_cairo_inverse_transform = initial_cairo_transform;
+			initial_cairo_inverse_transform.invert();
 
-			// WARNING: do I need to keep `desc` alive throughout its use?
 			auto& pg = *buffer->pango.layout;
 			auto desc = Pango::FontDescription(initial_pango_font);
 			pg.set_font_description(desc);
@@ -439,7 +440,7 @@ private: /* low-level helpers */
         return buffer;
     }
 
-    void create_shm_buffer(struct buffer* buffer, int width, int height, uint32_t format)
+    void create_shm_buffer(Buffer* buffer, int width, int height, uint32_t format)
     {
         const auto cr_format = shm_to_cairo_format(format);
 
@@ -597,7 +598,7 @@ public: /* listeners */
     {
         // log_event(__func__, "{}", data);
 
-        auto current_buffer = static_cast<struct buffer*>(data);
+        auto current_buffer = static_cast<Buffer*>(data);
         current_buffer->busy = false;
     }
 

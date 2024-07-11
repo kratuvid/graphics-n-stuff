@@ -7,6 +7,15 @@ public:
 	{
 		title = "Raytracer";
 	}
+
+private:
+	void update(float delta_time) override
+	{
+	}
+
+	void draw(Buffer* buffer, float delta_time) override
+	{
+	}
 };
 
 int main()
