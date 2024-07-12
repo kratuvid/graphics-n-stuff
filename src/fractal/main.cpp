@@ -1,6 +1,6 @@
 #include "raytracer-new/app.hpp"
 
-using oreal = float;
+using oreal = long double;
 using ocomplex = std::complex<oreal>;
 using ovec2 = glm::tvec2<oreal>;
 
@@ -92,13 +92,18 @@ public:
 		clear();
 		stop = true;
 
+		wait_all();
+
+		stop = false;
+	}
+
+	void wait_all()
+	{
 		for (unsigned i : std::views::iota(0u, nthreads))
 		{
 			work_state[i].lock();
 			work_state[i].unlock();
 		}
-
-		stop = false;
 	}
 
 	// WARNING: Don't release if the semaphore counter is at its max capacity
@@ -125,11 +130,7 @@ public:
 
 		// Waiting
 		std::println(stderr, "Waiting for {} threads to quit...", nthreads);
-		for (unsigned i : std::views::iota(0u, nthreads))
-		{
-			work_state[i].lock();
-			work_state[i].unlock();
-		}
+		wait_all();
 		for (auto& thread : workers)
 		{
 			thread.join();
@@ -208,7 +209,13 @@ private:
 					}
 
 					glm::vec3 color {};
-					color.r = iter / cmd.in_shared->max_iterations;
+
+					color.r = 1 + glm::sin((iter / float(cmd.in_shared->max_iterations)) * 2 * M_PIf + std::abs(coord));
+					color.r /= 2;
+					color.g = 1 + glm::sin(color.r * 2 * M_PIf + M_PIf / 4);
+					color.g /= 2;
+					color.b = 1 + glm::cos(color.g * 2 * M_PIf);
+					color.b /= 2;
 
 					cmd.out->canvas[index] = color_u32(color);
 				}
@@ -266,7 +273,7 @@ public:
 		title = "Fractal";
 		center = {0, 0};
 		range = {4, 4};
-		max_iterations = 2000;
+		max_iterations = 40;
 	}
 
 private:
@@ -277,14 +284,19 @@ private:
 
 	void setup() override
 	{
+		correct_by_aspect();
 		refresh(true);
+	}
+
+	void correct_by_aspect()
+	{
+		range.y = range.x * (height / float(width));
 	}
 
 	void refresh(bool resize = false)
 	{
-		if (resize) {
-			range.x = 4;
-			range.y = range.x * (height / float(width));
+		if (resize and false) {
+			correct_by_aspect();
 		}
 
 		thread_manager.halt();
@@ -364,7 +376,7 @@ private:
 			max_iterations += mi_rate;
 			refresh();
 		}
-		else if (input.keyboard.map[XKB_KEY_I]) {
+		else if (input.keyboard.map[XKB_KEY_o]) {
 			if (max_iterations > mi_rate)
 				max_iterations -= mi_rate;
 			if (max_iterations < 1)
@@ -385,6 +397,38 @@ private:
 			refresh(true);
 	}
 
+	void on_click(uint32_t button, uint32_t state) override
+	{
+		if (state != WL_POINTER_BUTTON_STATE_RELEASED) return;
+
+		if (button == BTN_LEFT)
+		{
+			const ovec2 start {
+				in_shared.center.x - in_shared.range.x / 2,
+				in_shared.center.y - in_shared.range.y / 2
+			};
+			const ovec2 delta {
+				in_shared.range.x / width,
+				in_shared.range.y / height
+			};
+
+			const auto& cpos = input.pointer.pos;
+			const ovec2 coord(start.x + delta.x * cpos.x, start.y + delta.y * (height - cpos.y - 1));
+
+			center = coord;
+		}
+		else if (button == BTN_RIGHT)
+		{
+			const float factor = 0.8;
+			if (!input.keyboard.map[XKB_KEY_Shift_L])
+				range *= factor;
+			else
+				range /= factor;
+		}
+
+		refresh();
+	}
+
 	void on_key(xkb_keysym_t key, wl_keyboard_key_state state) override
 	{
 		if (state == WL_KEYBOARD_KEY_STATE_RELEASED)
@@ -401,7 +445,8 @@ private:
 					"What do you want to change?\n"
 					"1. Max iterations ({})\n"
 					"2. Range ({}, {})\n"
-					"3. Center ({}, {})\n? ",
+					"3. Shrink range\n"
+					"4. Center ({}, {})\n? ",
 
 					(unsigned) max_iterations,
 					range.x, range.y,
@@ -424,6 +469,13 @@ private:
 					break;
 
 				case 3:
+					float factor;
+					std::print("Shrink range by: ");
+					std::cin >> factor;
+					range *= factor;
+					break;
+
+				case 4:
 					std::print("New center:\nx: ");
 					std::cin >> center.x;
 					std::print("y: ");
@@ -439,11 +491,21 @@ private:
 			} break;
 
 			case XKB_KEY_a: {
-				range.y = range.x * (height / float(width));
+				correct_by_aspect();
+				refresh();
+			} break;
+
+			case XKB_KEY_r: {
+				center = {0, 0};
+				range = {4, 4};
+				max_iterations = 40;
+				correct_by_aspect();
 				refresh();
 			} break;
 
 			case XKB_KEY_l: {
+				std::println("Center: ({}, {})", center.x, center.y);
+				std::println("Range: ({}, {})", range.x, range.y);
 				std::println("Max iterations: {}", max_iterations);
 			} break;
 			}
