@@ -1,4 +1,4 @@
-#include "raytracer-new/app.hpp"
+#include "fractal/app.hpp"
 
 using oreal = long double;
 using ocomplex = std::complex<oreal>;

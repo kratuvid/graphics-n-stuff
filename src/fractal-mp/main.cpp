@@ -1,6 +1,4 @@
-#include "raytracer-new/app.hpp"
-
-#include <mpc.h>
+#include "fractal-mp/app.hpp"
 
 // FEATURE: Increase the number of tasks per thread
 // FIXME: Segmentation fault when quitting while the frame is still being processed
@@ -44,7 +42,7 @@ private:
 	zreal const_4;
 
 	std::unique_ptr<zcomplex[]> zs, cs;
-	std::vector<std::array<zreal,3>> temps_v;
+	std::vector<std::array<zreal,1>> temps_v;
 	std::vector<std::array<zcomplex,1>> ctemps_v;
 
 public:
@@ -182,7 +180,7 @@ public:
 
 		spdlog::debug(oss.str());
 
-		// Free mp variables
+		// Free MP variables
 		for (unsigned i : std::views::iota(0u, nthreads)) {
 			mpc_clear(zs[i]);
 			mpc_clear(cs[i]);

@@ -28,6 +28,8 @@
 #include <pangomm.h>
 #include <pangomm/init.h>
 
+#include <mpc.h>
+
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/random.hpp>
@@ -37,4 +39,3 @@
 // wayland
 #include "wayland/xdg-shell.h"
 #include <wayland-client.h>
-#include <wayland-egl.h>

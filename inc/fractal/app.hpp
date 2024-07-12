@@ -1,7 +1,7 @@
 #pragma once
 
-#include "raytracer-new/pch.hpp"
-#include "raytracer-new/utility.hpp"
+#include "fractal/pch.hpp"
+#include "fractal/utility.hpp"
 
 #ifndef DISABLE_IASSERT
 #define iassert(expr, ...) \

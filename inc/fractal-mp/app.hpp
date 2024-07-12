@@ -1,7 +1,6 @@
 #pragma once
 
-#include "raytracer-new/pch.hpp"
-#include "raytracer-new/utility.hpp"
+#include "fractal-mp/pch.hpp"
 
 #ifndef DISABLE_IASSERT
 #define iassert(expr, ...) \
@@ -126,12 +125,12 @@ public: /* public interface */
     {
         rusage usage;
         if (getrusage(RUSAGE_SELF, &usage) == 0) {
-            spdlog::debug("Peak self RSS usage: {:.3f} MiB", usage.ru_maxrss / 1024.0);
-            spdlog::debug("User CPU time: {:.3f} s", usage.ru_utime.tv_sec + usage.ru_utime.tv_usec / 1e6f);
-            spdlog::debug("System CPU time: {:.3f} s", usage.ru_stime.tv_sec + usage.ru_stime.tv_usec / 1e6f);
+            spdlog::info("Peak self RSS usage: {:.3f} MiB", usage.ru_maxrss / 1024.0);
+            spdlog::info("User CPU time: {:.3f} s", usage.ru_utime.tv_sec + usage.ru_utime.tv_usec / 1e6f);
+            spdlog::info("System CPU time: {:.3f} s", usage.ru_stime.tv_sec + usage.ru_stime.tv_usec / 1e6f);
         }
         if (getrusage(RUSAGE_CHILDREN, &usage) == 0 && usage.ru_maxrss != 0)
-            spdlog::debug("Peak children RSS usage: {:.3f} MB", usage.ru_maxrss / 1024.0);
+            spdlog::info("Peak children RSS usage: {:.3f} MB", usage.ru_maxrss / 1024.0);
 
         destroy_input();
         destroy_buffers();
