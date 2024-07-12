@@ -3,7 +3,6 @@
 #include <mpc.h>
 
 // FEATURE: Increase the number of tasks per thread
-// FIXME: MPFR supports inplace. No need of temporary variables
 // FIXME: Segmentation fault when quitting while the frame is still being processed
 
 static constexpr mpfr_prec_t zprec = 53;
@@ -227,32 +226,30 @@ private:
 			auto& z = mgr->zs[id];
 			auto& c = mgr->cs[id];
 			auto& temps = mgr->temps_v[id];
-			auto& ctemps = mgr->ctemps_v[id];
+			[[maybe_unused]] auto& ctemps = mgr->ctemps_v[id];
 
-			[[maybe_unused]] const int width = cmd.in_shared->width, height = cmd.in_shared->height;
+			const int width = cmd.in_shared->width, height = cmd.in_shared->height;
 			const auto at_begin = at(0, cmd.in_per->row_start, width);
 
 			auto index = at_begin;
 			for (int row = cmd.in_per->row_start; row <= cmd.in_per->row_end; row++)
 			{
-				// temps[1] is the imaginary part of the current coordinate
-				mpfr_mul_ui(temps[0], cmd.in_shared->delta[1], height - row - 1, mgr->def_rnd);
-				mpfr_add(temps[1], cmd.in_shared->start[1], temps[0], mgr->def_rnd);
+				mpfr_mul_ui(c->im, cmd.in_shared->delta[1], height - row - 1, mgr->def_rnd);
+				mpfr_add(c->im, cmd.in_shared->start[1], c->im, mgr->def_rnd);
 
 				for (int col = 0; col < width; col++, index++)
 				{
-					// temps[0] is the real part of the current coordinate
-					mpfr_mul_ui(temps[2], cmd.in_shared->delta[0], col, mgr->def_rnd);
-					mpfr_add(temps[0], cmd.in_shared->start[0], temps[2], mgr->def_rnd);
+					mpfr_mul_ui(c->re, cmd.in_shared->delta[0], col, mgr->def_rnd);
+					mpfr_add(c->re, cmd.in_shared->start[0], c->re, mgr->def_rnd);
 
-					mpc_set_fr_fr(c, temps[0], temps[1], mgr->def_rnd);
-					mpc_set_ui_ui(z, 0, 0, mgr->def_rnd);
+					mpfr_set_zero(z->re, 1);
+					mpfr_set_zero(z->im, 1);
 
 					unsigned iter = 0;
 					for (; iter < cmd.in_shared->max_iterations; iter++)
 					{
-						mpc_sqr(ctemps[0], z, mgr->def_crnd);
-						mpc_add(z, ctemps[0], c, mgr->def_crnd);
+						mpc_sqr(z, z, mgr->def_crnd);
+						mpc_add(z, z, c, mgr->def_crnd);
 
 						mpc_norm(temps[0], z, mgr->def_rnd);
 						if (mpfr_greater_p(temps[0], mgr->const_4) != 0)
@@ -265,7 +262,6 @@ private:
 					const float abs = mpfr_get_flt(temps[0], mgr->def_rnd);
 
 					color.r = 1 + glm::sin((iter / float(cmd.in_shared->max_iterations)) * 2 * M_PIf + abs);
-					// color.r = 1 + glm::sin((iter / float(cmd.in_shared->max_iterations)) * 2 * M_PIf);
 					color.r /= 2;
 					color.g = 1 + glm::sin(color.r * 2 * M_PIf + M_PIf / 4);
 					color.g /= 2;
@@ -345,20 +341,15 @@ public:
 		mpfr_inits(in_shared.delta[0], in_shared.delta[1], nullptr);
 
 		mpfr_inits(center[0], center[1], nullptr);
-		mpfr_set_d(center[0], 0.0, def_rnd);
-		mpfr_set_d(center[1], 0.0, def_rnd);
-		
 		mpfr_inits(range[0], range[1], nullptr);
-		mpfr_set_d(range[0], 4.0, def_rnd);
-		mpfr_set_d(range[1], 4.0, def_rnd);
 
 		mpfr_inits(start[0], start[1], nullptr); // will be calculated
 		mpfr_inits(delta[0], delta[1], nullptr); // no need to initialize
 
 		for (auto& temp : temps)
 			mpfr_init(temp);
-		
-		max_iterations = 40;
+
+		initialize_variables();
 	}
 
 	~Fractal()
@@ -394,6 +385,17 @@ private:
 		recalculate_start();
 		recalculate_delta();
 		refresh(true);
+	}
+
+	void initialize_variables()
+	{
+		mpfr_set_d(center[0], 0.0, def_rnd);
+		mpfr_set_d(center[1], 0.0, def_rnd);
+
+		mpfr_set_d(range[0], 4.0, def_rnd);
+		mpfr_set_d(range[1], 4.0, def_rnd);
+
+		max_iterations = 40;
 	}
 
 	void correct_by_aspect()
@@ -441,10 +443,10 @@ private:
 	// depends on range and center
 	void recalculate_start()
 	{
-		mpfr_div_ui(temps[0], range[0], 2, def_rnd);
-		mpfr_sub(start[0], center[0], temps[0], def_rnd);
-		mpfr_div_ui(temps[0], range[1], 2, def_rnd);
-		mpfr_sub(start[1], center[1], temps[0], def_rnd);
+		mpfr_div_ui(start[0], range[0], 2, def_rnd);
+		mpfr_sub(start[0], center[0], start[0], def_rnd);
+		mpfr_div_ui(start[1], range[1], 2, def_rnd);
+		mpfr_sub(start[1], center[1], start[1], def_rnd);
 	}
 
 	// depends on range, width and height
@@ -636,25 +638,34 @@ private:
 				refresh();
 			} break;
 
-			/*
 			case XKB_KEY_r: {
-				center = {0, 0};
-				range = {4, 4};
-				max_iterations = 40;
+				initialize_variables();
 
 				correct_by_aspect();
 				recalculate_start();
 				recalculate_delta();
-
 				refresh();
 			} break;
 
 			case XKB_KEY_l: {
-				std::println("Center: ({}, {})", center.x, center.y);
-				std::println("Range: ({}, {})", range.x, range.y);
+				mpfr_exp_t exp[4];
+
+				auto c_x = mpfr_get_str(nullptr, &exp[0], 10, 0, center[0], def_rnd);
+				auto c_y = mpfr_get_str(nullptr, &exp[1], 10, 0, center[1], def_rnd);
+
+				auto r_x = mpfr_get_str(nullptr, &exp[2], 10, 0, range[0], def_rnd);
+				auto r_y = mpfr_get_str(nullptr, &exp[3], 10, 0, range[1], def_rnd);
+
+				std::println("Center: ({}:{}, {}:{})", c_x, exp[0], c_y, exp[1]);
+				std::println("Range: ({}:{}, {}:{})", r_x, exp[2], r_y, exp[3]);
 				std::println("Max iterations: {}", max_iterations);
+
+				mpfr_free_str(r_x);
+				mpfr_free_str(r_y);
+
+				mpfr_free_str(c_x);
+				mpfr_free_str(c_y);
 			} break;
-			*/
 			}
 		}
 	}
