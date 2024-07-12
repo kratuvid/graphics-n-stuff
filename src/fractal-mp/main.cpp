@@ -3,11 +3,12 @@
 // FEATURE: Increase the number of tasks per thread
 // FIXME: Segmentation fault when quitting while the frame is still being processed
 
-static constexpr mpfr_prec_t zprec = 53;
-
 using zreal = mpfr_t;
 using zcomplex = mpc_t;
 using zvec2 = zreal[2];
+
+static constexpr mpfr_prec_t zprec = 184;
+static constexpr unsigned work_multiplier = 4;
 
 template<class TBase, class TInShared, class TInPer, class TOut>
 class ThreadManager
@@ -49,7 +50,7 @@ public:
 	ThreadManager(const TBase* app, unsigned nthreads = std::thread::hardware_concurrency())
 		:app(app), nthreads(nthreads)
 	{
-		iassert(nthreads < semaphore_least_max_value, "Too many threads you got brother. Increase the semaphore's least max value");
+		iassert(nthreads * work_multiplier + 1 < semaphore_least_max_value, "Too many threads you got brother. Increase the semaphore's least max value");
 
 		work_state = std::make_unique<std::mutex[]>(nthreads);
 		memset(work_state.get(), 0x00, sizeof(std::mutex) * nthreads);
@@ -131,6 +132,9 @@ public:
 
 	void wait_all()
 	{
+		// FIXME: This method probably will not work with a work multiplier
+		// when the queue is filled. Fortunately all use cases of this function are
+		// with otherwise
 		for (unsigned i : std::views::iota(0u, nthreads))
 		{
 			work_state[i].lock();
@@ -263,7 +267,7 @@ private:
 					color.r /= 2;
 					color.g = 1 + glm::sin(color.r * 2 * M_PIf + M_PIf / 4);
 					color.g /= 2;
-					color.b = 1 + glm::cos(color.g * 2 * M_PIf);
+					color.b = 1 + glm::cos(color.r * 2 * M_PIf);
 					color.b /= 2;
 
 					cmd.out->canvas[index] = color_u32(color);
@@ -456,10 +460,12 @@ private:
 
 	void distribute()
 	{
-		const int range_size = height / thread_manager.num_threads();
-		const int range_size_left = height % thread_manager.num_threads();
+		const int work_size = thread_manager.num_threads() * work_multiplier;
 
-		in_per.resize(range_size == 0 ? 1 : thread_manager.num_threads());
+		const int range_size = height / work_size;
+		const int range_size_left = height % work_size;
+
+		in_per.resize(range_size == 0 ? 1 : work_size);
 
 		unsigned next_index = 0;
 		for (
@@ -474,12 +480,10 @@ private:
 
 		if (range_size_left != 0)
 		{
-			auto& ip = in_per[in_per.size()-1];
+			in_per.resize(in_per.size() + 1);
+			auto& ip = in_per.back();
+			ip.row_start = height - range_size_left;
 			ip.row_end = height - 1;
-			if (range_size == 0)
-			{
-				ip.row_start = 0;
-			}
 		}
 	}
 
