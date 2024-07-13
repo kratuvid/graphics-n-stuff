@@ -1,4 +1,5 @@
 #include "fractal-mp/app.hpp"
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 // FIXME: Segmentation fault when quitting while the frame is still being processed
 
@@ -314,7 +315,11 @@ private:
 	static uint32_t color_u32(glm::vec3 color)
 	{
 		color = glm::clamp(color, glm::vec3(0), glm::vec3(1));
-		return (uint32_t(color.r * 255)) << 16 | (uint32_t(color.g * 255)) << 8 | uint32_t(color.b * 255);
+		return \
+			(uint32_t(255) << 24) |
+			(uint32_t(color.r * 255)) << 16 |
+			(uint32_t(color.g * 255)) << 8 |
+			uint32_t(color.b * 255);
 	}
 
 	static size_t at(int col, int row, int width)
@@ -363,13 +368,14 @@ class Fractal : public App
 		std::string final_center {};
 		double zoom = 0;
 		bool no_correct_aspect = false;
+		bool silent = false;
 
 		struct {
 			std::string_view str;
 			std::string_view str_desc;
 			ArgType type;
 			void* ptr;
-		} const desc[10] {
+		} const desc[11] {
 			{"--help", "b: Self explanatory", ArgType::boolean, &help},
 			{"--render", "b: Outputs raw frames to stdout once initiated", ArgType::boolean, &render},
 			{"--seconds", "i: Total render time", ArgType::integer, &seconds},
@@ -379,7 +385,8 @@ class Fractal : public App
 			{"--start-range", "s: Range to begin from", ArgType::string, &start_range},
 			{"--final-center", "s: Center to finally reach", ArgType::string, &final_center},
 			{"--zoom", "d: Zoom", ArgType::dreal, &zoom},
-			{"--no-correct-range", "s: Do not correct the range by the aspect ratio", ArgType::boolean, &no_correct_aspect},
+			{"--no-correct-range", "b: Do not correct the range by the aspect ratio", ArgType::boolean, &no_correct_aspect},
+			{"--silent", "b: Don't utter anything while rendering", ArgType::boolean, &silent},
 		};
 		const size_t desc_size = sizeof(desc) / sizeof(*desc);
 
@@ -429,11 +436,8 @@ public:
 
 	~Fractal()
 	{
-		if (is_rendering)
-		{
-			render_thread.request_stop();
-			render_thread.join();
-		}
+		render_thread.request_stop();
+		render_thread.join();
 
 		free_zvec(delta_range);
 
@@ -627,12 +631,16 @@ private:
 		mpfr_set_default_prec(zprec);
 		mpfr_set_default_rounding_mode(app->def_rnd);
 
+		auto& canvas = app->out.canvas;
+		const size_t pixel_size = sizeof canvas[0];
+
 		for (unsigned frame=0; frame < app->total_frames; frame++)
 		{
 			const double frame_ratio = frame / double(app->total_frames-1);
 			const double seconds_in = frame_ratio * app->args.seconds;
 
-			std::print(stderr, "\rRendering frame {} aka {:.3f}%, {:.6f}s...  ", frame + 1, frame_ratio * 100, seconds_in);
+			if (!app->args.silent)
+				std::print(stderr, "\rRendering frame {} aka {:.3f}%, {:.6f}s...  ", frame + 1, frame_ratio * 100, seconds_in);
 
 			app->thread_manager.halt();
 
@@ -666,14 +674,17 @@ private:
 				std::this_thread::sleep_for(std::chrono::milliseconds(250));
 			}
 
+			// if the faulty implementation of ThreadManager::is_any_working() missed some
 			app->thread_manager.wait_all(true);
+
+			std::cout.write(reinterpret_cast<const char*>(canvas.data()), canvas.size() * pixel_size);
+			iassert(!std::cout.bad());
 		}
 
-		std::println(stderr, "Phew done!");
-
-		app->is_rendering = false;
+		std::println(stderr, "\rPhew done!  ");
 
 abrupt_exit:
+		app->is_rendering = false;
 		mpfr_free_cache();
 	}
 
@@ -900,6 +911,9 @@ private:
 
 				if (!is_rendering)
 				{
+					if (isatty(1))
+						throw std::runtime_error("To render standard output must be associated with a file/pipe");
+					
 					std::println(stderr, "Began rendering...\nParameters:", width, height);
 					std::println(stderr,
 						"  Dimensions: {}x{}\n"
@@ -1035,6 +1049,9 @@ private: // helpers
 
 int main(int argc, char** argv)
 {
+	auto stderr_logger = spdlog::stderr_color_mt("stderr_logger");
+	spdlog::set_default_logger(stderr_logger);
+
     spdlog::set_level(spdlog::level::debug);
     spdlog::set_pattern("[%^%l%$ +%o] %v");
 
