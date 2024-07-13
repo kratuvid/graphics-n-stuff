@@ -166,16 +166,18 @@ public:
 
 		// Statistics
 		const auto total_work_cumulative = std::accumulate(work_cumulative.begin(), work_cumulative.end(), 0);
+		const double ideal_dist = 1 / double(nthreads);
 
 		std::ostringstream oss;
-		oss << "ThreadManager: " << "Σ (work) = " << total_work_cumulative << ":\n  distribution = ";
+		oss << "Stats:\n  " << "Σ (work) = " << total_work_cumulative << "\n  Δ (distribution) = ";
 		oss << std::fixed << std::setprecision(2);
 		for (int i=0; i < nthreads; i++)
 		{
-			auto dist = work_cumulative[i] / double(total_work_cumulative);
-			oss << dist * 100 << "%, ";
+			const auto dist = work_cumulative[i] / double(total_work_cumulative);
+			const auto delta = ideal_dist - dist;
+			oss << delta * 100 << "%, ";
 		}
-		spdlog::debug(oss.str());
+		std::println(stderr, "{}", oss.str());
 
 		// Free MP variables
 		for (unsigned i : std::views::iota(0u, nthreads)) {
@@ -226,7 +228,6 @@ private:
 					left_ritual();
 					continue;
 				}
-				// iassert(!mgr->command_queue.empty());
 
 				cmd = mgr->command_queue.front();
 				mgr->command_queue.pop();
@@ -644,11 +645,8 @@ private:
 			app->recalculate_delta();
 			app->refresh();
 
-			while (true)
+			while (!app->thread_manager.is_done())
 			{
-				if (app->thread_manager.is_done())
-					break;
-
 				if (stop.stop_requested()) {
 					app->thread_manager.halt();
 					goto abrupt_exit;
