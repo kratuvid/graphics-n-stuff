@@ -1,18 +1,17 @@
 // system headers
 #include <chrono>
+#include <condition_variable>
 #include <exception>
+#include <iostream>
+#include <numeric>
 #include <print>
 #include <queue>
+#include <ranges>
+#include <semaphore>
 #include <source_location>
 #include <string_view>
 #include <thread>
-#include <tuple>
 #include <unordered_map>
-#include <ranges>
-#include <semaphore>
-#include <numeric>
-#include <complex>
-#include <iostream>
 
 #include <fcntl.h>
 #include <linux/input-event-codes.h>
@@ -22,6 +21,7 @@
 
 // external libraries
 #include <spdlog/spdlog.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <cairomm/cairomm.h>
 

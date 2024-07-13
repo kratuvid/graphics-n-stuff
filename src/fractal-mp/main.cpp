@@ -1,5 +1,4 @@
 #include "fractal-mp/app.hpp"
-#include <spdlog/sinks/stdout_color_sinks.h>
 
 // FIXME: Segmentation fault when quitting while the frame is still being processed
 
@@ -24,42 +23,41 @@ public:
 	static constexpr std::ptrdiff_t semaphore_least_max_value = 64;
 
 private:
-	const TBase* app;
-	unsigned nthreads = 0;
-
-	std::vector<std::thread> workers;
-
-	std::counting_semaphore<semaphore_least_max_value> command_semaphore {0};
-	std::mutex command_mutex;
-	std::queue<Command> command_queue;
-
-	std::unique_ptr<std::mutex[]> work_state;
-	std::vector<uint64_t> work_done;
-	std::atomic_bool stop = false;
-
 	mpfr_rnd_t def_rnd;
 	mpc_rnd_t def_crnd;
 
-	zreal const_4;
+	unsigned nthreads = 0;
 
+	std::vector<std::thread> workers;
+	std::vector<uint64_t> work_cumulative;
+
+	std::counting_semaphore<semaphore_least_max_value> launch_semaphore {0};
+	
+	std::mutex command_queue_mtx;
+	std::queue<Command> command_queue;
+
+	std::mutex left_mtx;
+	std::condition_variable left_cv;
+	std::atomic_short left = 0;
+	std::atomic_bool stop = false;
+
+	zreal const_4;
 	std::unique_ptr<zcomplex[]> zs, cs;
 	std::vector<std::array<zreal,1>> temps_v;
 	std::vector<std::array<zcomplex,1>> ctemps_v;
 
 public:
-	ThreadManager() {}
-
-	void initialize(const TBase* app, unsigned nthreads = std::thread::hardware_concurrency())
+	ThreadManager(unsigned nthreads = std::thread::hardware_concurrency())
+		:nthreads(nthreads)
 	{
-		this->app = app;
-		this->nthreads = nthreads;
 		iassert(nthreads != 0);
+		iassert(work_multiplier != 0);
+		iassert(nthreads * work_multiplier < semaphore_least_max_value);
+	}
 
-		iassert(nthreads * work_multiplier + 1 < semaphore_least_max_value, "Too many threads you got brother. Increase the semaphore's least max value");
-
-		work_state = std::make_unique<std::mutex[]>(nthreads);
-		memset(work_state.get(), 0x00, sizeof(std::mutex) * nthreads);
-		work_done.resize(nthreads, 0);
+	void initialize()
+	{
+		work_cumulative.resize(nthreads, 0);
 
 		def_rnd = mpfr_get_default_rounding_mode();
 		def_crnd = MPC_RND(def_rnd, def_rnd);
@@ -85,127 +83,98 @@ public:
 		}
 	}
 
-	auto num_threads() const
+	void launch(std::ptrdiff_t update = 1)
 	{
-		return nthreads;
+		left = update;
+		launch_semaphore.release(update);
 	}
 
 	void enqueue(Command&& cmd, unsigned count = 1)
 	{
 		const Command& cmd_cref = cmd;
-		command_mutex.lock();
+		std::scoped_lock lg(command_queue_mtx);
 		for (unsigned _ : std::views::iota(0u, count)) {
 			command_queue.push(cmd_cref);
 		}
-		command_mutex.unlock();
 	}
 
 	template<class IterBegin, class IterEnd>
 	void enqueue(IterBegin begin, IterEnd end)
 	{
-		command_mutex.lock();
+		std::scoped_lock lg(command_queue_mtx);
 		for (auto it = begin; it != end; it++) {
 			command_queue.push(*it);
 		}
-		command_mutex.unlock();
 	}
 
 	template<class Func>
 	void enqueue(Func setter)
 	{
-		command_mutex.lock();
+		std::scoped_lock lg(command_queue_mtx);
 		setter(command_queue);
-		command_mutex.unlock();
-	}
-
-	void clear()
-	{
-		command_mutex.lock();
-		while (!command_queue.empty())
-			command_queue.pop();
-		command_mutex.unlock();
 	}
 
 	void halt()
 	{
 		clear();
-
+		if (is_done())
+			return;
 		stop = true;
-		wait_all();
+		wait();
 		stop = false;
 	}
 
-	bool is_any_working()
+	void wait()
 	{
-		for (unsigned i : std::views::iota(0u, nthreads))
-		{
-			if (!work_state[i].try_lock())
-				return true;
-			work_state[i].unlock();
-		}
-		return false;
+		std::unique_lock lg(left_mtx);
+		left_cv.wait(lg, [this](){ return left == 0; });
 	}
 
-	void wait_all(bool filled = false)
+	bool is_done() const
 	{
-		// FIXME: This method probably will not work with a work multiplier
-		// when the queue is filled. Fortunately all use cases of this function are
-		// with otherwise
-		
-		for (unsigned i=0; i < nthreads; i++)
-		{
-			work_state[i].lock();
-			work_state[i].unlock();
-
-			if (filled and i == nthreads-1) {
-				if (!command_queue.empty())
-					i = 0;
-			}
-		}
+		return left == 0;
 	}
 
-	// WARNING: Don't release if the semaphore counter is at its max capacity
-	void release(std::ptrdiff_t update = 1)
+	auto num_threads() const
 	{
-		command_semaphore.release(update);
+		return nthreads;
 	}
 
 	~ThreadManager()
 	{
-		if (nthreads == 0) return;
+		if (work_cumulative.size() == 0) return;
 
 		Command cmd_quit = {.type = CommandType::quit};
 
 		// Filling in the command queues
-		command_mutex.lock();
-		while (!command_queue.empty())
-			command_queue.pop();
-		for (unsigned _ : std::views::iota(0u, nthreads))
-			command_queue.push(cmd_quit);
-		command_mutex.unlock();
+		{
+			std::scoped_lock lg(command_queue_mtx);
+			while (!command_queue.empty())
+				command_queue.pop();
+			for (unsigned _ : std::views::iota(0u, nthreads))
+				command_queue.push(cmd_quit);
+		}
 
 		// Signalling
 		stop = true;
-		release(nthreads);
+		launch_semaphore.release(nthreads);
 
 		// Waiting
 		std::println(stderr, "Waiting for {} threads to quit...", nthreads);
-		wait_all();
 		for (auto& thread : workers)
 			thread.join();
 
 		// Statistics
-		const auto total_work_done = std::accumulate(work_done.begin(), work_done.end(), 0);
+		const auto total_work_cumulative = std::accumulate(work_cumulative.begin(), work_cumulative.end(), 0);
 
 		std::ostringstream oss;
-		oss << "ThreadManager: " << "Σ (work) = " << total_work_done << ": distribution = ";
-
+		oss << "ThreadManager: " << "Σ (work) = " << total_work_cumulative << ":\n  distribution = ";
+		oss << std::fixed << std::setprecision(2);
 		for (int i=0; i < nthreads; i++)
 		{
-			double dist = work_done[i] / double(total_work_done);
+			auto dist = work_cumulative[i] / double(total_work_cumulative);
 			oss << dist * 100 << "%, ";
 		}
-
 		spdlog::debug(oss.str());
 
 		// Free MP variables
@@ -223,32 +192,53 @@ public:
 	}
 
 private:
+	void clear()
+	{
+		std::scoped_lock lg(command_queue_mtx);
+		while (!command_queue.empty())
+			command_queue.pop();
+	}
+
+private:
 	static void workplace(unsigned id, ThreadManager* mgr)
 	{
 		mpfr_set_default_prec(zprec);
 		mpfr_set_default_rounding_mode(mgr->def_rnd);
 
+		auto left_ritual = [&]()
+		{
+			std::unique_lock lg(mgr->left_mtx);
+			iassert(mgr->left > 0)
+
+			mgr->left--;
+			if (mgr->left == 0)
+				mgr->left_cv.notify_all();
+		};
+
 		while (true)
 		{
-			mgr->command_semaphore.acquire();
-			mgr->command_mutex.lock();
-			if (mgr->command_queue.empty()) {
-				mgr->command_mutex.unlock();
-				continue;
+			Command cmd;
+
+			mgr->launch_semaphore.acquire();
+			{
+				std::scoped_lock sl(mgr->command_queue_mtx);
+				if (mgr->command_queue.empty()) {
+					left_ritual();
+					continue;
+				}
+				// iassert(!mgr->command_queue.empty());
+
+				cmd = mgr->command_queue.front();
+				mgr->command_queue.pop();
 			}
-			Command cmd = mgr->command_queue.front();
-			mgr->command_queue.pop();
-			mgr->command_mutex.unlock();
 
 			// spdlog::debug("{}: Commanded {}", id, cmd.type == CommandType::quit ? "quit" : "work");
 
+			// Quit
 			if (cmd.type == CommandType::quit)
 				break;
 
 			// Work
-			{
-			std::lock_guard<std::mutex> lg(mgr->work_state[id]);
-
 			auto& z = mgr->zs[id];
 			auto& c = mgr->cs[id];
 			auto& temps = mgr->temps_v[id];
@@ -305,8 +295,9 @@ private:
 				if (mgr->stop) break;
 			}
 
-			mgr->work_done[id]++;
-			}
+			left_ritual();
+
+			mgr->work_cumulative[id]++;
 		}
 
 		mpfr_free_cache();
@@ -470,7 +461,7 @@ private:
 	{
 		title = "Fractal-MP";
 		initialize_variables();
-		thread_manager.initialize(this);
+		thread_manager.initialize();
 	}
 
 	void setup_pre() override
@@ -510,10 +501,6 @@ private:
 
 	void refresh(bool resize = false)
 	{
-		if (resize and false) {
-			correct_by_aspect();
-		}
-
 		thread_manager.halt();
 
 		if (resize) {
@@ -522,12 +509,11 @@ private:
 			out.canvas.resize(width * height);
 		}
 		reassign_dynamic();
-
 		if (resize) {
 			distribute();
 		}
 
-		pump();
+		launch();
 	}
 
 	void reassign_dynamic()
@@ -589,7 +575,7 @@ private:
 		}
 	}
 
-	void pump()
+	void launch()
 	{
 		thread_manager.enqueue([&](std::queue<Command>& queue) {
 			Command cmd {
@@ -602,7 +588,7 @@ private:
 				queue.push(cmd);
 			}
 		});
-		thread_manager.release(in_per.size());
+		thread_manager.launch(in_per.size());
 	}
 
 	void update(float delta_time) override
@@ -653,13 +639,6 @@ private:
 
 			mpfr_mul_d(app->range[1], app->delta_range[1], frame_ratio, app->def_rnd);
 			mpfr_add(app->range[1], app->range[1], app->args.refined.start_range[1], app->def_rnd);
-			// mpfr_sub(app->range[1], app->range[1], app->args.refined.start_range[1], app->def_rnd);
-
-			/*
-			auto x = mpfr_get_d(app->delta_range[0], app->def_rnd);
-			auto y = mpfr_get_d(app->delta_range[1], app->def_rnd);
-			spdlog::debug("Delta range: {} {}", x, y);
-			*/
 
 			app->recalculate_start();
 			app->recalculate_delta();
@@ -667,25 +646,22 @@ private:
 
 			while (true)
 			{
+				if (app->thread_manager.is_done())
+					break;
+
 				if (stop.stop_requested()) {
 					app->thread_manager.halt();
 					goto abrupt_exit;
 				}
 
-				if (!app->thread_manager.is_any_working())
-					break;
-
 				std::this_thread::sleep_for(std::chrono::milliseconds(250));
 			}
-
-			// if the faulty implementation of ThreadManager::is_any_working() missed some
-			app->thread_manager.wait_all(true);
 
 			std::cout.write(reinterpret_cast<const char*>(canvas.data()), canvas.size() * pixel_size);
 			iassert(!std::cout.bad());
 		}
 
-		std::println(stderr, "\rPhew done!  ");
+		std::println(stderr, "Phew done!  ");
 
 abrupt_exit:
 		std::cout.flush();
@@ -886,7 +862,7 @@ private:
 				}
 
 				std::println("Set!");
-				refresh();
+				launch();
 			} break;
 			*/
 
