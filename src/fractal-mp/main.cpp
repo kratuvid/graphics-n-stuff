@@ -688,8 +688,10 @@ private:
 		std::println(stderr, "\rPhew done!  ");
 
 abrupt_exit:
-		app->is_rendering = false;
+		std::cout.flush();
 		mpfr_free_cache();
+
+		app->is_rendering = false;
 	}
 
 public:
