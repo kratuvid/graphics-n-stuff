@@ -360,6 +360,7 @@ class Fractal : public App
 		bool help = false;
 
 		bool render = false;
+		int initial_iterations = 0;
 		int seconds = 0;
 		int fps = 0;
 
@@ -375,9 +376,10 @@ class Fractal : public App
 			std::string_view str_desc;
 			ArgType type;
 			void* ptr;
-		} const desc[11] {
+		} const desc[12] {
 			{"--help", "b: Self explanatory", ArgType::boolean, &help},
 			{"--render", "b: Outputs raw frames to stdout once initiated", ArgType::boolean, &render},
+			{"--initial-iterations", "i: Initial max iterations", ArgType::integer, &initial_iterations},
 			{"--seconds", "i: Total render time", ArgType::integer, &seconds},
 			{"--fps", "i: FPS of the render", ArgType::integer, &fps},
 			{"--center-sway-mode", "i: How to travel from the starting to the final center. Supported is fixed(1)", ArgType::integer, &center_sway_mode},
@@ -436,8 +438,10 @@ public:
 
 	~Fractal()
 	{
-		render_thread.request_stop();
-		render_thread.join();
+		if (is_rendering) {
+			render_thread.request_stop();
+			render_thread.join();
+		}
 
 		free_zvec(delta_range);
 
@@ -749,6 +753,7 @@ public:
 
 		if (args.render)
 		{
+			iassert(args.initial_iterations > 0);
 			iassert(args.seconds > 0);
 			iassert(args.fps > 0);
 			iassert(args.center_sway_mode > 0);
@@ -917,6 +922,7 @@ private:
 					std::println(stderr, "Began rendering...\nParameters:", width, height);
 					std::println(stderr,
 						"  Dimensions: {}x{}\n"
+						"  Initial iterations: {}\n"
 						"  Seconds: {}\n"
 						"  FPS: {}\n"
 						"  Center sway mode: {}\n"
@@ -925,6 +931,7 @@ private:
 						"  Start range: {}\n"
 						"  Zoom: {}",
 						width, height,
+						args.initial_iterations,
 						args.seconds,
 						args.fps,
 						args.center_sway_mode,
@@ -933,6 +940,8 @@ private:
 						get_zvec(args.refined.start_range),
 						args.zoom
 					);
+
+					max_iterations = args.initial_iterations;
 
 					switch (args.center_sway_mode) {
 					case 1: // fixed
