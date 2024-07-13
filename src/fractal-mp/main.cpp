@@ -1,13 +1,12 @@
 #include "fractal-mp/app.hpp"
 
-// FEATURE: Increase the number of tasks per thread
 // FIXME: Segmentation fault when quitting while the frame is still being processed
 
 using zreal = mpfr_t;
 using zcomplex = mpc_t;
 using zvec2 = zreal[2];
+static constexpr mpfr_prec_t zprec = 53;
 
-static constexpr mpfr_prec_t zprec = 184;
 static constexpr unsigned work_multiplier = 4;
 
 template<class TBase, class TInShared, class TInPer, class TOut>
@@ -25,7 +24,7 @@ public:
 
 private:
 	const TBase* app;
-	unsigned nthreads;
+	unsigned nthreads = 0;
 
 	std::vector<std::thread> workers;
 
@@ -47,9 +46,14 @@ private:
 	std::vector<std::array<zcomplex,1>> ctemps_v;
 
 public:
-	ThreadManager(const TBase* app, unsigned nthreads = std::thread::hardware_concurrency())
-		:app(app), nthreads(nthreads)
+	ThreadManager() {}
+
+	void initialize(const TBase* app, unsigned nthreads = std::thread::hardware_concurrency())
 	{
+		this->app = app;
+		this->nthreads = nthreads;
+		iassert(nthreads != 0);
+
 		iassert(nthreads * work_multiplier + 1 < semaphore_least_max_value, "Too many threads you got brother. Increase the semaphore's least max value");
 
 		work_state = std::make_unique<std::mutex[]>(nthreads);
@@ -150,6 +154,8 @@ public:
 
 	~ThreadManager()
 	{
+		if (nthreads == 0) return;
+
 		Command cmd_quit = {.type = CommandType::quit};
 
 		// Filling in the command queues
@@ -260,10 +266,15 @@ private:
 
 					glm::vec3 color {};
 
-					mpc_abs(temps[0], c, mgr->def_rnd);
-					const float abs = mpfr_get_flt(temps[0], mgr->def_rnd);
+					const float iter_ratio = iter / float(cmd.in_shared->max_iterations);
 
-					color.r = 1 + glm::sin((iter / float(cmd.in_shared->max_iterations)) * 2 * M_PIf + abs);
+					mpc_abs(temps[0], c, mgr->def_rnd);
+					const float abs_c = mpfr_get_flt(temps[0], mgr->def_rnd);
+
+					mpc_abs(temps[0], z, mgr->def_rnd);
+					const float abs_z = mpfr_get_flt(temps[0], mgr->def_rnd);
+
+					color.r = 1 + glm::sin(iter_ratio * 2 * M_PIf + abs_c);
 					color.r /= 2;
 					color.g = 1 + glm::sin(color.r * 2 * M_PIf + M_PIf / 4);
 					color.g /= 2;
@@ -310,7 +321,7 @@ class Fractal : public App
 		std::vector<uint32_t> canvas;
 	};
 
-	InShared in_shared;
+	InShared in_shared {};
 	std::vector<InPer> in_per;
 	Out out;
 
@@ -319,63 +330,107 @@ class Fractal : public App
 	using CommandType = decltype(thread_manager)::CommandType;
 	using Command = decltype(thread_manager)::Command;
 
+	enum class ArgType {
+		boolean, integer, string
+	};
+
+	struct {
+		bool help = false;
+
+		bool render = false;
+		int fps = 0;
+
+		int center_sway_mode = 0;
+		std::string start_center {}, start_range {};
+		std::string final_center {};
+		bool no_correct_aspect = false;
+
+		struct {
+			std::string_view str;
+			std::string_view str_desc;
+			ArgType type;
+			void* ptr;
+		} const desc[8] {
+			{"--help", "b: Self explanatory", ArgType::boolean, &help},
+			{"--render", "b: Outputs raw frames to stdout once initiated", ArgType::boolean, &render},
+			{"--fps", "i: FPS of the render", ArgType::integer, &fps},
+			{"--center-sway-mode", "i: How to travel from the starting to the final center. Supported is fixed(1)", ArgType::integer, &center_sway_mode},
+			{"--start-center", "s: Center to begin from", ArgType::string, &start_center},
+			{"--start-range", "s: Range to begin from", ArgType::string, &start_range},
+			{"--final-center", "s: Center to finally reach", ArgType::string, &final_center},
+			{"--no-correct-range", "s: Do not correct the range by the aspect ratio", ArgType::boolean, &no_correct_aspect},
+		};
+		const size_t desc_size = sizeof(desc) / sizeof(*desc);
+
+		struct {
+			zvec2 start_center {}, start_range {};
+			zvec2 final_center {};
+		} refined;
+	} args;
+
 	mpfr_rnd_t def_rnd;
 
-	zvec2 center, range;
-	zvec2 start, delta;
+	zvec2 center {}, range {};
+	zvec2 start {}, delta {};
 	double max_iterations;
 
-	std::array<zreal, 2> temps;
+	std::array<zreal, 2> temps {};
+
+	bool is_rendering = false;
 	
 public:
 	Fractal()
-		:thread_manager(this)
 	{
-		title = "Fractal-MP";
-
 		def_rnd = mpfr_get_default_rounding_mode();
 		mpfr_set_default_prec(zprec);
 
-		mpfr_inits(in_shared.center[0], in_shared.center[1], nullptr);
-		mpfr_inits(in_shared.range[0], in_shared.range[1], nullptr);
+		alloc_zvec(args.refined.start_center);
+		alloc_zvec(args.refined.start_range);
+		alloc_zvec(args.refined.final_center);
 
-		mpfr_inits(in_shared.start[0], in_shared.start[1], nullptr);
-		mpfr_inits(in_shared.delta[0], in_shared.delta[1], nullptr);
+		alloc_zvec(in_shared.center);
+		alloc_zvec(in_shared.range);
+		alloc_zvec(in_shared.start);
+		alloc_zvec(in_shared.delta);
 
-		mpfr_inits(center[0], center[1], nullptr);
-		mpfr_inits(range[0], range[1], nullptr);
+		alloc_zvec(center);
+		alloc_zvec(range);
+		alloc_zvec(start);
+		alloc_zvec(delta);
 
-		mpfr_inits(start[0], start[1], nullptr); // will be calculated
-		mpfr_inits(delta[0], delta[1], nullptr); // no need to initialize
-
-		for (auto& temp : temps)
-			mpfr_init(temp);
-
-		initialize_variables();
+		alloc_zvec(temps);
 	}
 
 	~Fractal()
 	{
-		for (auto& temp : temps)
-			mpfr_clear(temp);
+		free_zvec(temps);
 
-		mpfr_clears(start[0], start[1], nullptr);
-		mpfr_clears(delta[0], delta[1], nullptr);
+		free_zvec(start);
+		free_zvec(delta);
+		free_zvec(center);
+		free_zvec(range);
 
-		mpfr_clears(center[0], center[1], nullptr);
-		mpfr_clears(range[0], range[1], nullptr);
+		free_zvec(in_shared.start);
+		free_zvec(in_shared.delta);
+		free_zvec(in_shared.center);
+		free_zvec(in_shared.range);
 
-		mpfr_clears(in_shared.start[0], in_shared.start[1], nullptr);
-		mpfr_clears(in_shared.delta[0], in_shared.delta[1], nullptr);
-
-		mpfr_clears(in_shared.center[0], in_shared.center[1], nullptr);
-		mpfr_clears(in_shared.range[0], in_shared.range[1], nullptr);
+		free_zvec(args.refined.start_center);
+		free_zvec(args.refined.start_range);
+		free_zvec(args.refined.final_center);
 
 		mpfr_free_cache();
 		mpfr_free_cache2(static_cast<mpfr_free_cache_t>(MPFR_FREE_LOCAL_CACHE | MPFR_FREE_GLOBAL_CACHE));
 	}
 
 private:
+	void initialize_pre() override
+	{
+		title = "Fractal-MP";
+		initialize_variables();
+		thread_manager.initialize(this);
+	}
+
 	void setup_pre() override
 	{
 		setup();
@@ -465,7 +520,7 @@ private:
 		const int range_size = height / work_size;
 		const int range_size_left = height % work_size;
 
-		in_per.resize(range_size == 0 ? 1 : work_size);
+		in_per.resize(range_size == 0 ? 1 : work_size, {});
 
 		unsigned next_index = 0;
 		for (
@@ -480,7 +535,7 @@ private:
 
 		if (range_size_left != 0)
 		{
-			in_per.resize(in_per.size() + 1);
+			in_per.resize(in_per.size() + 1, {});
 			auto& ip = in_per.back();
 			ip.row_start = height - range_size_left;
 			ip.row_end = height - 1;
@@ -505,18 +560,20 @@ private:
 
 	void update(float delta_time) override
 	{
-		const float mi_rate = 100 * delta_time;
+		if (!is_rendering) {
+			const float mi_rate = 100 * delta_time;
 
-		if (input.keyboard.map[XKB_KEY_i]) {
-			max_iterations += mi_rate;
-			refresh();
-		}
-		else if (input.keyboard.map[XKB_KEY_o]) {
-			if (max_iterations > mi_rate)
-				max_iterations -= mi_rate;
-			if (max_iterations < 1)
-				max_iterations = 1;
-			refresh();
+			if (input.keyboard.map[XKB_KEY_i]) {
+				max_iterations += mi_rate;
+				refresh();
+			}
+			else if (input.keyboard.map[XKB_KEY_o]) {
+				if (max_iterations > mi_rate)
+					max_iterations -= mi_rate;
+				if (max_iterations < 1)
+					max_iterations = 1;
+				refresh();
+			}
 		}
 	}
 
@@ -525,11 +582,84 @@ private:
 		memcpy(buffer->shm_data, out.canvas.data(), out.canvas.size() * sizeof(decltype(out.canvas)::value_type));
 	}
 
+public:
+	void process_args(int argc, char** argv)
+	{
+		for (int i=1; i < argc; i++)
+		{
+			const std::string_view arg(argv[i]);
+
+			auto desc = std::find_if(args.desc, args.desc + args.desc_size, [arg](const auto& desc) {
+				if (desc.str == arg)
+					return true;
+				return false;
+			});
+
+			if (desc == args.desc + args.desc_size) {
+				throw std::runtime_error(std::format("Ignoring unknown argument: {}", arg));
+			} else {
+				switch (desc->type)
+				{
+				case ArgType::boolean:
+					*static_cast<bool*>(desc->ptr) = true;
+					break;
+
+				case ArgType::integer:
+					i++;
+					if (i >= argc)
+						throw std::runtime_error(std::format("Provide the integer {} is expecting", arg));
+					*static_cast<int*>(desc->ptr) = std::stoi(argv[i]);
+					break;
+
+				case ArgType::string:
+					i++;
+					if (i >= argc)
+						throw std::runtime_error(std::format("Provide the string {} is expecting", arg));
+					*static_cast<std::string*>(desc->ptr) = argv[i];
+					break;
+
+				default:
+					iassert(false, "Case {} left uncovered", static_cast<int>(desc->type));
+					break;
+				}
+			}
+		}
+
+		if (args.help)
+		{
+			std::println("Options:");
+			for (auto const& desc : args.desc) {
+				std::println("  {}: {}", desc.str, desc.str_desc);
+			}
+			throw Fractal::assertion();
+		}
+
+		if (args.render)
+		{
+			iassert(args.fps > 0);
+			iassert(args.center_sway_mode > 0);
+			iassert(!args.start_center.empty());
+			iassert(!args.start_range.empty());
+			iassert(!args.final_center.empty());
+
+			set_zvec(args.refined.start_center, args.start_center);
+			set_zvec(args.refined.start_range, args.start_range);
+			set_zvec(args.refined.final_center, args.final_center);
+
+			spdlog::debug(
+				"Start center: {}, final center: {}, start range: {}",
+				get_zvec(args.refined.start_center),
+				get_zvec(args.refined.final_center),
+				get_zvec(args.refined.start_range));
+		}
+	}
+
 private:
 	void on_create_buffer(Buffer* buffer) override
 	{
 		if (in_shared.width != width or in_shared.height != height)
 		{
+			iassert(!is_rendering, "Resizing while rendering is disallowed");
 			recalculate_start();
 			recalculate_delta();
 			refresh(true);
@@ -538,6 +668,7 @@ private:
 
 	void on_click(uint32_t button, uint32_t state) override
 	{
+		if (is_rendering) return;
 		if (state != WL_POINTER_BUTTON_STATE_RELEASED) return;
 
 		if (button == BTN_LEFT)
@@ -577,6 +708,7 @@ private:
 			switch (key)
 			{
 			case XKB_KEY_space: {
+				if (is_rendering) return;
 				refresh();
 			} break;
 
@@ -634,13 +766,17 @@ private:
 			*/
 
 			case XKB_KEY_a: {
+				if (is_rendering) return;
+
 				correct_by_aspect();
 				recalculate_start();
 				recalculate_delta();
 				refresh();
 			} break;
 
-			case XKB_KEY_r: {
+			case XKB_KEY_s: {
+				if (is_rendering) return;
+
 				initialize_variables();
 
 				correct_by_aspect();
@@ -649,37 +785,99 @@ private:
 				refresh();
 			} break;
 
+			case XKB_KEY_r: {
+				if (!args.render) {
+					std::println(stderr, "Render mode is disabled");
+					break;
+				}
+
+				if (!is_rendering) {
+					// TODO
+					is_rendering = true;
+				}
+			} break;
+
 			case XKB_KEY_l: {
-				mpfr_exp_t exp[4];
+				auto c = get_zvec(center);
+				auto r = get_zvec(range);
 
-				auto c_x = mpfr_get_str(nullptr, &exp[0], 10, 0, center[0], def_rnd);
-				auto c_y = mpfr_get_str(nullptr, &exp[1], 10, 0, center[1], def_rnd);
-
-				auto r_x = mpfr_get_str(nullptr, &exp[2], 10, 0, range[0], def_rnd);
-				auto r_y = mpfr_get_str(nullptr, &exp[3], 10, 0, range[1], def_rnd);
-
-				std::println("Center: ({}:{}, {}:{})", c_x, exp[0], c_y, exp[1]);
-				std::println("Range: ({}:{}, {}:{})", r_x, exp[2], r_y, exp[3]);
+				std::println("Center: {}", c);
+				std::println("Range: {}", r);
 				std::println("Max iterations: {}", max_iterations);
-
-				mpfr_free_str(r_x);
-				mpfr_free_str(r_y);
-
-				mpfr_free_str(c_x);
-				mpfr_free_str(c_y);
 			} break;
 			}
 		}
 	}
+
+private: // helpers
+	void alloc_zvec(auto& vec)
+	{
+		for (auto& elem : vec) {
+			iassert(!elem->_mpfr_d, "Contains: {}", static_cast<void*>(elem->_mpfr_d));
+			mpfr_init(elem);
+		}
+	}
+
+	void free_zvec(auto& vec)
+	{
+		for (auto& elem : vec) {
+			if (elem->_mpfr_d)
+				mpfr_clear(elem);
+		}
+	}
+
+	void set_zvec(auto& vec, std::string_view str_v)
+	{
+		const size_t comps = sizeof(vec) / sizeof(*vec);
+		iassert(comps == 2, "Currently only vectors of length 2 are supported");
+
+		std::string str(str_v);
+
+		auto comma = str.find(',');
+		iassert(comma != std::string_view::npos);
+
+		auto first = str.substr(0, comma);
+		auto second = str.substr(comma+1);
+
+		iassert(!first.empty());
+		iassert(!second.empty());
+
+		str[comma] = '\0';
+
+		iassert(mpfr_set_str(vec[0], first.data(), 10, def_rnd) == 0); 
+		iassert(mpfr_set_str(vec[1], second.data(), 10, def_rnd) == 0);
+	}
+
+	std::string get_zvec(const auto& vec)
+	{
+		const size_t comps = sizeof(vec) / sizeof(*vec);
+		
+		std::ostringstream oss;
+
+		oss << "(";
+		for (size_t i=0; i < comps; i++)
+		{
+			mpfr_exp_t exp;
+			auto str = mpfr_get_str(nullptr, &exp, 10, 0, vec[i], def_rnd);
+			oss << str << ':' << exp;
+			mpfr_free_str(str);
+
+			if (i != comps-1) oss << " ";
+		}
+		oss << ")";
+
+		return oss.str();
+	}
 };
 
-int main()
+int main(int argc, char** argv)
 {
     spdlog::set_level(spdlog::level::debug);
     spdlog::set_pattern("[%^%l%$ +%o] %v");
 
     Fractal app;
     try {
+		app.process_args(argc, argv);
         app.initialize();
         app.run();
     } catch (const App::assertion&) {

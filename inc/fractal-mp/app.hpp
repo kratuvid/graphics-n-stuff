@@ -101,11 +101,18 @@ protected: /* variables */
 public: /* public interface */
     void initialize()
     {
+		initialize_pre();
+
         srand(time(nullptr));
         initialize_wayland();
         initialize_window();
 		initialize_pango();
+
+		initialize_post();
     }
+
+	virtual void initialize_pre() {}
+	virtual void initialize_post() {}
 
     void run()
     {
