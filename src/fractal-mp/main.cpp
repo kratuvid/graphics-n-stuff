@@ -134,15 +134,32 @@ public:
 		stop = false;
 	}
 
-	void wait_all()
+	bool is_any_working()
+	{
+		for (unsigned i : std::views::iota(0u, nthreads))
+		{
+			if (!work_state[i].try_lock())
+				return true;
+			work_state[i].unlock();
+		}
+		return false;
+	}
+
+	void wait_all(bool filled = false)
 	{
 		// FIXME: This method probably will not work with a work multiplier
 		// when the queue is filled. Fortunately all use cases of this function are
 		// with otherwise
-		for (unsigned i : std::views::iota(0u, nthreads))
+		
+		for (unsigned i=0; i < nthreads; i++)
 		{
 			work_state[i].lock();
 			work_state[i].unlock();
+
+			if (filled and i == nthreads-1) {
+				if (!command_queue.empty())
+					i = 0;
+			}
 		}
 	}
 
@@ -271,8 +288,8 @@ private:
 					mpc_abs(temps[0], c, mgr->def_rnd);
 					const float abs_c = mpfr_get_flt(temps[0], mgr->def_rnd);
 
-					mpc_abs(temps[0], z, mgr->def_rnd);
-					const float abs_z = mpfr_get_flt(temps[0], mgr->def_rnd);
+					/* mpc_abs(temps[0], z, mgr->def_rnd);
+					const float abs_z = mpfr_get_flt(temps[0], mgr->def_rnd); */
 
 					color.r = 1 + glm::sin(iter_ratio * 2 * M_PIf + abs_c);
 					color.r /= 2;
@@ -331,18 +348,20 @@ class Fractal : public App
 	using Command = decltype(thread_manager)::Command;
 
 	enum class ArgType {
-		boolean, integer, string
+		boolean, integer, dreal, string
 	};
 
 	struct {
 		bool help = false;
 
 		bool render = false;
+		int seconds = 0;
 		int fps = 0;
 
 		int center_sway_mode = 0;
 		std::string start_center {}, start_range {};
 		std::string final_center {};
+		double zoom = 0;
 		bool no_correct_aspect = false;
 
 		struct {
@@ -350,14 +369,16 @@ class Fractal : public App
 			std::string_view str_desc;
 			ArgType type;
 			void* ptr;
-		} const desc[8] {
+		} const desc[10] {
 			{"--help", "b: Self explanatory", ArgType::boolean, &help},
 			{"--render", "b: Outputs raw frames to stdout once initiated", ArgType::boolean, &render},
+			{"--seconds", "i: Total render time", ArgType::integer, &seconds},
 			{"--fps", "i: FPS of the render", ArgType::integer, &fps},
 			{"--center-sway-mode", "i: How to travel from the starting to the final center. Supported is fixed(1)", ArgType::integer, &center_sway_mode},
 			{"--start-center", "s: Center to begin from", ArgType::string, &start_center},
 			{"--start-range", "s: Range to begin from", ArgType::string, &start_range},
 			{"--final-center", "s: Center to finally reach", ArgType::string, &final_center},
+			{"--zoom", "d: Zoom", ArgType::dreal, &zoom},
 			{"--no-correct-range", "s: Do not correct the range by the aspect ratio", ArgType::boolean, &no_correct_aspect},
 		};
 		const size_t desc_size = sizeof(desc) / sizeof(*desc);
@@ -369,20 +390,25 @@ class Fractal : public App
 	} args;
 
 	mpfr_rnd_t def_rnd;
+	std::array<zreal, 2> temps {};
 
 	zvec2 center {}, range {};
 	zvec2 start {}, delta {};
 	double max_iterations;
 
-	std::array<zreal, 2> temps {};
-
-	bool is_rendering = false;
+	// Rendering specific
+	std::atomic_bool is_rendering = false;
+	unsigned total_frames;
+	zvec2 delta_range {};
+	std::jthread render_thread;
 	
 public:
 	Fractal()
 	{
 		def_rnd = mpfr_get_default_rounding_mode();
 		mpfr_set_default_prec(zprec);
+
+		alloc_zvec(temps);
 
 		alloc_zvec(args.refined.start_center);
 		alloc_zvec(args.refined.start_range);
@@ -398,12 +424,18 @@ public:
 		alloc_zvec(start);
 		alloc_zvec(delta);
 
-		alloc_zvec(temps);
+		alloc_zvec(delta_range);
 	}
 
 	~Fractal()
 	{
-		free_zvec(temps);
+		if (is_rendering)
+		{
+			render_thread.request_stop();
+			render_thread.join();
+		}
+
+		free_zvec(delta_range);
 
 		free_zvec(start);
 		free_zvec(delta);
@@ -418,6 +450,8 @@ public:
 		free_zvec(args.refined.start_center);
 		free_zvec(args.refined.start_range);
 		free_zvec(args.refined.final_center);
+
+		free_zvec(temps);
 
 		mpfr_free_cache();
 		mpfr_free_cache2(static_cast<mpfr_free_cache_t>(MPFR_FREE_LOCAL_CACHE | MPFR_FREE_GLOBAL_CACHE));
@@ -457,8 +491,13 @@ private:
 
 	void correct_by_aspect()
 	{
+		correct_by_aspect_any(range);
+	}
+
+	void correct_by_aspect_any(zvec2& vec)
+	{
 		const auto inv_ar = height / double(width);
-		mpfr_mul_d(range[1], range[0], inv_ar, def_rnd);
+		mpfr_mul_d(vec[1], vec[0], inv_ar, def_rnd);
 	}
 
 	void refresh(bool resize = false)
@@ -582,6 +621,62 @@ private:
 		memcpy(buffer->shm_data, out.canvas.data(), out.canvas.size() * sizeof(decltype(out.canvas)::value_type));
 	}
 
+private:
+	static void render_workplace(std::stop_token stop, Fractal* app)
+	{
+		mpfr_set_default_prec(zprec);
+		mpfr_set_default_rounding_mode(app->def_rnd);
+
+		for (unsigned frame=0; frame < app->total_frames; frame++)
+		{
+			const double frame_ratio = frame / double(app->total_frames-1);
+			const double seconds_in = frame_ratio * app->args.seconds;
+
+			std::print(stderr, "\rRendering frame {} aka {:.3f}%, {:.6f}s...  ", frame + 1, frame_ratio * 100, seconds_in);
+
+			app->thread_manager.halt();
+
+			mpfr_mul_d(app->range[0], app->delta_range[0], frame_ratio, app->def_rnd);
+			mpfr_add(app->range[0], app->range[0], app->args.refined.start_range[0], app->def_rnd);
+
+			mpfr_mul_d(app->range[1], app->delta_range[1], frame_ratio, app->def_rnd);
+			mpfr_add(app->range[1], app->range[1], app->args.refined.start_range[1], app->def_rnd);
+			// mpfr_sub(app->range[1], app->range[1], app->args.refined.start_range[1], app->def_rnd);
+
+			/*
+			auto x = mpfr_get_d(app->delta_range[0], app->def_rnd);
+			auto y = mpfr_get_d(app->delta_range[1], app->def_rnd);
+			spdlog::debug("Delta range: {} {}", x, y);
+			*/
+
+			app->recalculate_start();
+			app->recalculate_delta();
+			app->refresh();
+
+			while (true)
+			{
+				if (stop.stop_requested()) {
+					app->thread_manager.halt();
+					goto abrupt_exit;
+				}
+
+				if (!app->thread_manager.is_any_working())
+					break;
+
+				std::this_thread::sleep_for(std::chrono::milliseconds(250));
+			}
+
+			app->thread_manager.wait_all(true);
+		}
+
+		std::println(stderr, "Phew done!");
+
+		app->is_rendering = false;
+
+abrupt_exit:
+		mpfr_free_cache();
+	}
+
 public:
 	void process_args(int argc, char** argv)
 	{
@@ -611,6 +706,13 @@ public:
 					*static_cast<int*>(desc->ptr) = std::stoi(argv[i]);
 					break;
 
+				case ArgType::dreal:
+					i++;
+					if (i >= argc)
+						throw std::runtime_error(std::format("Provide the double {} is expecting", arg));
+					*static_cast<double*>(desc->ptr) = std::stod(argv[i]);
+					break;
+
 				case ArgType::string:
 					i++;
 					if (i >= argc)
@@ -627,30 +729,34 @@ public:
 
 		if (args.help)
 		{
-			std::println("Options:");
+			std::println(stderr, "Options:");
 			for (auto const& desc : args.desc) {
-				std::println("  {}: {}", desc.str, desc.str_desc);
+				std::println(stderr, "  {}: {}", desc.str, desc.str_desc);
 			}
 			throw Fractal::assertion();
 		}
 
 		if (args.render)
 		{
+			iassert(args.seconds > 0);
 			iassert(args.fps > 0);
 			iassert(args.center_sway_mode > 0);
 			iassert(!args.start_center.empty());
 			iassert(!args.start_range.empty());
 			iassert(!args.final_center.empty());
+			iassert(args.zoom > 0);
 
 			set_zvec(args.refined.start_center, args.start_center);
 			set_zvec(args.refined.start_range, args.start_range);
 			set_zvec(args.refined.final_center, args.final_center);
 
+			/*
 			spdlog::debug(
 				"Start center: {}, final center: {}, start range: {}",
 				get_zvec(args.refined.start_center),
 				get_zvec(args.refined.final_center),
 				get_zvec(args.refined.start_range));
+			*/
 		}
 	}
 
@@ -709,6 +815,7 @@ private:
 			{
 			case XKB_KEY_space: {
 				if (is_rendering) return;
+
 				refresh();
 			} break;
 
@@ -791,8 +898,64 @@ private:
 					break;
 				}
 
-				if (!is_rendering) {
-					// TODO
+				if (!is_rendering)
+				{
+					std::println(stderr, "Began rendering...\nParameters:", width, height);
+					std::println(stderr,
+						"  Dimensions: {}x{}\n"
+						"  Seconds: {}\n"
+						"  FPS: {}\n"
+						"  Center sway mode: {}\n"
+						"  Start center: {}\n"
+						"  Final center: {}\n"
+						"  Start range: {}\n"
+						"  Zoom: {}",
+						width, height,
+						args.seconds,
+						args.fps,
+						args.center_sway_mode,
+						get_zvec(args.refined.start_center),
+						get_zvec(args.refined.final_center),
+						get_zvec(args.refined.start_range),
+						args.zoom
+					);
+
+					switch (args.center_sway_mode) {
+					case 1: // fixed
+						mpfr_set(center[0], args.refined.final_center[0], def_rnd);
+						mpfr_set(center[1], args.refined.final_center[1], def_rnd);
+						break;
+
+					default:
+						iassert(false, "Unsupported or invalid sway mode {}", args.center_sway_mode);
+						break;
+					}
+
+					if (!args.no_correct_aspect) {
+						correct_by_aspect_any(args.refined.start_range);
+					}
+
+					/* Calculate delta_range */
+					// (temps[0], temps[1]) is the final range
+					mpfr_div_d(temps[0], args.refined.start_range[0], args.zoom, def_rnd);
+					mpfr_div_d(temps[1], args.refined.start_range[1], args.zoom, def_rnd);
+					// final step
+					mpfr_sub(delta_range[0], temps[0], args.refined.start_range[0], def_rnd);
+					mpfr_sub(delta_range[1], temps[1], args.refined.start_range[1], def_rnd);
+
+					total_frames = args.fps * args.seconds;
+
+					std::println(stderr, "Calculated:\n"
+						"  Corrected range: {}\n"
+						"  Delta range: {}\n"
+						"  Total frames: {}",
+						get_zvec(args.refined.start_range),
+						get_zvec(delta_range),
+						total_frames
+					);
+
+					render_thread = std::jthread(render_workplace, this);
+
 					is_rendering = true;
 				}
 			} break;
@@ -801,9 +964,9 @@ private:
 				auto c = get_zvec(center);
 				auto r = get_zvec(range);
 
-				std::println("Center: {}", c);
-				std::println("Range: {}", r);
-				std::println("Max iterations: {}", max_iterations);
+				std::println(stderr, "Center: {}", c);
+				std::println(stderr, "Range: {}", r);
+				std::println(stderr, "Max iterations: {}", max_iterations);
 			} break;
 			}
 		}
