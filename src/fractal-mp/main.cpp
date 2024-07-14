@@ -1,7 +1,5 @@
 #include "fractal-mp/app.hpp"
 
-// FIXME: Segmentation fault when quitting while the frame is still being processed
-
 using zreal = mpfr_t;
 using zcomplex = mpc_t;
 using zvec2 = zreal[2];
@@ -140,7 +138,7 @@ public:
 		return nthreads;
 	}
 
-	~ThreadManager()
+	void destroy() // DO NOT FORGET TO CALL!
 	{
 		if (work_cumulative.size() == 0) return;
 
@@ -169,12 +167,12 @@ public:
 		const double ideal_dist = 1 / double(nthreads);
 
 		std::ostringstream oss;
-		oss << "Stats:\n  " << "Σ (work) = " << total_work_cumulative << "\n  Δ (distribution) = ";
+		oss << "Multithreading stats:\n  " << "Σ (work) = " << total_work_cumulative << "\n  Δ (distribution) = ";
 		oss << std::fixed << std::setprecision(2);
 		for (int i=0; i < nthreads; i++)
 		{
 			const auto dist = work_cumulative[i] / double(total_work_cumulative);
-			const auto delta = ideal_dist - dist;
+			const auto delta = dist - ideal_dist;
 			oss << delta * 100 << "%, ";
 		}
 		std::println(stderr, "{}", oss.str());
@@ -434,6 +432,8 @@ public:
 			render_thread.request_stop();
 			render_thread.join();
 		}
+
+		thread_manager.destroy();
 
 		free_zvec(delta_range);
 

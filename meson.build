@@ -1,10 +1,14 @@
 project('opengl-studies', 'c', 'cpp', default_options: ['c_std=c23', 'cpp_std=c++23', 'b_lto=true'])
 if get_option('buildtype').startswith('debug')
-  add_project_arguments(['-DDEBUG'], language: 'cpp')
+  args = ['-DDEBUG']
+  add_project_arguments(args, language: 'cpp')
+  add_project_link_arguments(args, language: 'cpp')
 else
-  add_project_arguments('-Ofast', language: 'cpp')
-  add_project_link_arguments('-Ofast', language: 'cpp')
+  args = ['-Ofast', '-march=native']
+  add_project_arguments(args, language: 'cpp')
+  add_project_link_arguments(args, language: 'cpp')
 endif
+add_project_arguments(['-pipe'], language: 'cpp')
 
 cpp = meson.get_compiler('cpp')
 
