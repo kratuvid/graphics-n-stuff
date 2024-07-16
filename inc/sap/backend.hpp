@@ -5,5 +5,9 @@
 class Backend
 {
 public:
-	
+	Backend()
+	{}
+
+	~Backend()
+	{}
 };
