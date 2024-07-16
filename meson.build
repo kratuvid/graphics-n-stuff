@@ -59,4 +59,4 @@ executable('raytracer-new', 'src/raytracer-new/main.cpp', include_directories: i
 executable('fractal', 'src/fractal/main.cpp', include_directories: incs['primary'], dependencies: deps_shm , cpp_pch: 'inc/fractal/pch.hpp')
 executable('fractal-mp', 'src/fractal-mp/main.cpp', include_directories: incs['primary'], dependencies: deps_shm + deps['mpfr'] + deps['mpc'], cpp_pch: 'inc/fractal-mp/pch.hpp')
 
-executable('sap', 'src/sap/main.cpp', include_directories: [incs['primary']] + [include_directories('inc/sap')], dependencies: deps_egl)
+executable('sap', 'src/sap/main.cpp', include_directories: [incs['primary']] + [include_directories('inc/sap')], dependencies: deps_egl, cpp_pch: 'inc/sap/pch.hpp')

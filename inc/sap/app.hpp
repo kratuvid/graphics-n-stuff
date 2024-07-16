@@ -8,27 +8,32 @@
 class App
 {
 protected: /* variables */
-    // wayland
     struct
     {
-        wl_display* display;
-        wl_registry* registry;
-        wl_compositor* compositor;
-        xdg_wm_base* wm_base;
-        wl_shm* shm;
-        wl_seat* seat;
-    } wayland {};
+		wl_display* display;
+		wl_registry* registry;
+
+		struct {
+			wl_compositor* compositor;
+			xdg_wm_base* wm_base;
+			wl_shm* shm;
+			wl_seat* seat;
+		} global;
+
+		struct {
+			wl_pointer* pointer;
+			wl_keyboard* keyboard;
+		} seat;
+    } wl {};
 
     struct
     {
         struct {
-            wl_pointer* object;
-            glm::ivec2 pos, cpos;
+            glm::ivec2 pos;
             bool button[3];
         } pointer;
 
         struct {
-            wl_keyboard* object;
             struct {
                 xkb_context* context;
                 xkb_state* state;
@@ -97,10 +102,10 @@ public: /* public interface */
 
         setup_pre();
         redraw(this, nullptr, 0);
-        wl_display_roundtrip(wayland.display);
+        wl_display_roundtrip(wl.display);
         setup();
 
-        while (running && wl_display_dispatch(wayland.display) != -1);
+        while (running && wl_display_dispatch(wl.display) != -1);
         
         destroy();
     }
@@ -125,22 +130,22 @@ public: /* public interface */
 private: /* private interface */
     void initialize_wayland()
     {
-        iassert(wayland.display = wl_display_connect(nullptr));
-        iassert(wayland.registry = wl_display_get_registry(wayland.display));
+        iassert(wl.display = wl_display_connect(nullptr));
+        iassert(wl.registry = wl_display_get_registry(wl.display));
 
-        wl_registry_add_listener(wayland.registry, &registry_listener, this);
-        wl_display_roundtrip(wayland.display);
-        iassert(wayland.wm_base);
-        iassert(wayland.compositor);
-        iassert(wayland.shm);
-        iassert(wayland.seat);
-        wl_display_roundtrip(wayland.display);
+        wl_registry_add_listener(wl.registry, &registry_listener, this);
+        wl_display_roundtrip(wl.display);
+        iassert(wl.global.wm_base);
+        iassert(wl.global.compositor);
+        iassert(wl.global.shm);
+        iassert(wl.global.seat);
+        wl_display_roundtrip(wl.display);
     }
 
     void initialize_window()
     {
-        iassert(window.surface = wl_compositor_create_surface(wayland.compositor));
-        iassert(window.xsurface = xdg_wm_base_get_xdg_surface(wayland.wm_base, window.surface));
+        iassert(window.surface = wl_compositor_create_surface(wl.global.compositor));
+        iassert(window.xsurface = xdg_wm_base_get_xdg_surface(wl.global.wm_base, window.surface));
         iassert(window.xtoplevel = xdg_surface_get_toplevel(window.xsurface));
 
         xdg_surface_add_listener(window.xsurface, &xsurface_listener, this);
@@ -148,16 +153,16 @@ private: /* private interface */
 
         wl_surface_commit(window.surface);
         while (!is_initial_configured)
-            wl_display_dispatch(wayland.display);
+            wl_display_dispatch(wl.display);
     }
 
     void destroy_input()
     {
         safe_free(input.keyboard.xkb.state, xkb_state_unref);
         safe_free(input.keyboard.xkb.context, xkb_context_unref);
-        safe_free(input.keyboard.object, wl_keyboard_destroy);
+        safe_free(wl.seat.keyboard, wl_keyboard_destroy);
 
-        safe_free(input.pointer.object, wl_pointer_destroy);
+        safe_free(wl.seat.pointer, wl_pointer_destroy);
     }
 
     void destroy_buffers()
@@ -183,12 +188,12 @@ private: /* private interface */
 
     void destroy_wayland()
     {
-        safe_free(wayland.seat, wl_seat_destroy);
-        safe_free(wayland.shm, wl_shm_destroy);
-        safe_free(wayland.wm_base, xdg_wm_base_destroy);
-        safe_free(wayland.compositor, wl_compositor_destroy);
-        safe_free(wayland.registry, wl_registry_destroy);
-        safe_free(wayland.display, wl_display_disconnect);
+        safe_free(wl.global.seat, wl_seat_destroy);
+        safe_free(wl.global.shm, wl_shm_destroy);
+        safe_free(wl.global.wm_base, xdg_wm_base_destroy);
+        safe_free(wl.global.compositor, wl_compositor_destroy);
+        safe_free(wl.registry, wl_registry_destroy);
+        safe_free(wl.display, wl_display_disconnect);
     }
 
 public: /* external redraw */
@@ -299,13 +304,6 @@ protected: /* events */
 	}
 
 protected: /* low-level helpers */
-    void pixel_range2(Buffer* buffer, int x, int y, int ex, int ey, uint32_t color)
-    {
-        centered(x, y);
-        centered(ex, ey);
-        pixel_range(buffer, x, y, ex, ey, color);
-    }
-
     void pixel_range(Buffer* buffer, int x, int y, int ex, int ey, uint32_t color)
     {
         x = std::clamp(x, 0, width - 1);
@@ -317,12 +315,6 @@ protected: /* low-level helpers */
             std::fill(&buffer->shm_data_u32[location], &buffer->shm_data_u32[location_end], color);
     }
 
-    uint32_t& pixel_at2(Buffer* buffer, int x, int y)
-    {
-        centered(x, y);
-        return pixel_at(buffer, x, y);
-    }
-
     uint32_t& pixel_at(Buffer* buffer, int x, int y)
     {
         static uint32_t facade;
@@ -332,20 +324,6 @@ protected: /* low-level helpers */
         }
         const ssize_t location = at(x, y);
         return buffer->shm_data_u32[location];
-    }
-
-    void uncentered(int& x, int& y)
-    {
-		double _x = x, _y = y;
-		// FIXME: cairo.initial_reverse_transform.transform_point(_x, _y);
-		x = _x; y = _y;
-    }
-
-    void centered(int& x, int& y)
-    {
-		double _x = x, _y = y;
-		// FIXME: cairo.initial_transform.transform_point(_x, _y);
-		x = _x; y = _y;
     }
 
     ssize_t at(int x, int y)
@@ -395,7 +373,7 @@ private: // buffer management
         buffer->shm_data = data;
 
         wl_shm_pool* pool;
-        iassert(pool = wl_shm_create_pool(wayland.shm, fd, size));
+        iassert(pool = wl_shm_create_pool(wl.global.shm, fd, size));
         iassert(buffer->buffer = wl_shm_pool_create_buffer(pool, 0, width, height, stride, format));
         wl_buffer_add_listener(buffer->buffer, &buffer_listener, buffer);
         wl_shm_pool_destroy(pool);
@@ -429,16 +407,16 @@ public: /* listeners */
         auto app = static_cast<App*>(data);
 
         if (strcmp(interface, "wl_shm") == 0) {
-            iassert(app->wayland.shm = (wl_shm*)wl_registry_bind(registry, name, &wl_shm_interface, 1));
-            wl_shm_add_listener(app->wayland.shm, &shm_listener, data);
+            iassert(app->wl.global.shm = (wl_shm*)wl_registry_bind(registry, name, &wl_shm_interface, 1));
+            wl_shm_add_listener(app->wl.global.shm, &shm_listener, data);
         } else if (strcmp(interface, "wl_compositor") == 0) {
-            iassert(app->wayland.compositor = (wl_compositor*)wl_registry_bind(registry, name, &wl_compositor_interface, 4));
+            iassert(app->wl.global.compositor = (wl_compositor*)wl_registry_bind(registry, name, &wl_compositor_interface, 4));
         } else if (strcmp(interface, "xdg_wm_base") == 0) {
-            iassert(app->wayland.wm_base = (xdg_wm_base*)wl_registry_bind(registry, name, &xdg_wm_base_interface, 1));
-            xdg_wm_base_add_listener(app->wayland.wm_base, &wm_base_listener, data);
+            iassert(app->wl.global.wm_base = (xdg_wm_base*)wl_registry_bind(registry, name, &xdg_wm_base_interface, 1));
+            xdg_wm_base_add_listener(app->wl.global.wm_base, &wm_base_listener, data);
         } else if (strcmp(interface, "wl_seat") == 0) {
-            iassert(app->wayland.seat = (wl_seat*)wl_registry_bind(registry, name, &wl_seat_interface, 5));
-            wl_seat_add_listener(app->wayland.seat, &seat_listener, data);
+            iassert(app->wl.global.seat = (wl_seat*)wl_registry_bind(registry, name, &wl_seat_interface, 5));
+            wl_seat_add_listener(app->wl.global.seat, &seat_listener, data);
         }
     }
     static void on_registry_global_remove(void* data, wl_registry* registry, uint32_t name)
@@ -524,25 +502,25 @@ public: /* listeners */
 
         auto app = static_cast<App*>(data);
 
-        if (!app->input.pointer.object) {
+        if (!app->wl.seat.pointer) {
             if (caps & WL_SEAT_CAPABILITY_POINTER) {
-                iassert(app->input.pointer.object = wl_seat_get_pointer(seat));
-                wl_pointer_add_listener(app->input.pointer.object, &pointer_listener, data);
+                iassert(app->wl.seat.pointer = wl_seat_get_pointer(seat));
+                wl_pointer_add_listener(app->wl.seat.pointer, &pointer_listener, data);
             }
         } else {
             if (!(caps & WL_SEAT_CAPABILITY_POINTER)) {
-                safe_free(app->input.pointer.object, wl_pointer_destroy);
+                safe_free(app->wl.seat.pointer, wl_pointer_destroy);
             }
         }
 
-        if (!app->input.keyboard.object) {
+        if (!app->wl.seat.keyboard) {
             if (caps & WL_SEAT_CAPABILITY_KEYBOARD) {
-                iassert(app->input.keyboard.object = wl_seat_get_keyboard(seat));
-                wl_keyboard_add_listener(app->input.keyboard.object, &keyboard_listener, data);
+                iassert(app->wl.seat.keyboard = wl_seat_get_keyboard(seat));
+                wl_keyboard_add_listener(app->wl.seat.keyboard, &keyboard_listener, data);
             }
         } else {
             if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD)) {
-                safe_free(app->input.keyboard.object, wl_keyboard_destroy);
+                safe_free(app->wl.seat.keyboard, wl_keyboard_destroy);
             }
         }
     }
@@ -557,8 +535,6 @@ public: /* listeners */
 
         int ix = wl_fixed_to_int(x), iy = wl_fixed_to_int(y);
         app->input.pointer.pos = glm::ivec2(ix, iy);
-        app->uncentered(ix, iy);
-        app->input.pointer.cpos = glm::ivec2(ix, iy);
     }
     static void on_pointer_leave(void* data, wl_pointer* pointer, uint32_t, wl_surface*)
     {
@@ -569,8 +545,6 @@ public: /* listeners */
 
         int ix = wl_fixed_to_int(x), iy = wl_fixed_to_int(y);
         app->input.pointer.pos = glm::ivec2(ix, iy);
-        app->uncentered(ix, iy);
-        app->input.pointer.cpos = glm::ivec2(ix, iy);
     }
     static void on_pointer_button(void* data, wl_pointer* pointer, uint32_t, uint32_t, uint32_t button, uint32_t state)
     {
