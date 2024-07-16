@@ -1,16 +1,9 @@
 #pragma once
 
 #include "pch.hpp"
+#include "utility.hpp"
 
-#ifndef DISABLE_IASSERT
-#define iassert(expr, ...) \
-    if (!(expr))           \
-        App::_iassert(#expr, std::source_location::current() __VA_OPT__(, ) __VA_ARGS__);
-#else
-#define iassert(expr, ...) \
-    if (!(expr))           \
-        ;
-#endif
+#define iassert(expr, ...) iassert_base(App::assertion, expr __VA_OPT__(, ) __VA_ARGS__);
 
 class App
 {
@@ -62,15 +55,6 @@ protected: /* variables */
             uint8_t* shm_data_u8;
         };
         size_t shm_size;
-
-        struct {
-            Cairo::RefPtr<Cairo::ImageSurface> surface;
-            Cairo::RefPtr<Cairo::Context> context;
-        } cairo;
-
-		struct {
-			Glib::RefPtr<Pango::Layout> layout;
-		} pango;
     } buffers[2] {};
 
     bool rebuild_buffers = false;
@@ -79,8 +63,8 @@ protected: /* variables */
     // internal state
     int width = 800, height = 600;
     bool running = true;
-    float elapsed_time = 0, delta_update_time = 0, delta_draw_time = 0;
     bool is_initial_configured = false;
+    float elapsed_time = 0, delta_update_time = 0, delta_draw_time = 0;
 
     std::chrono::high_resolution_clock::time_point tp_begin, tp_very_last;
     std::chrono::nanoseconds duration_pause { 0 };
@@ -90,16 +74,6 @@ protected: /* variables */
 	// configurable
     std::string_view title {"App!"};
     unsigned substeps = 1;
-
-	struct {
-		glm::vec2 initial_translate {0, 0};
-		glm::vec2 initial_scale {1, 1};
-		Cairo::Matrix initial_transform, initial_reverse_transform;
-	} cairo {};
-
-	struct {
-		std::string initial_font {"Noto Sans 20"};
-	} pango {};
 	// END - configurable
 
 public: /* public interface */
@@ -110,7 +84,6 @@ public: /* public interface */
         srand(time(nullptr));
         initialize_wayland();
         initialize_window();
-		initialize_pango();
 
 		initialize_post();
     }
@@ -145,7 +118,6 @@ public: /* public interface */
 
         destroy_input();
         destroy_buffers();
-		destroy_pango();
         destroy_window();
         destroy_wayland();
     }
@@ -179,20 +151,6 @@ private: /* private interface */
             wl_display_dispatch(wayland.display);
     }
 
-	void initialize_pango()
-	{
-		Pango::init();
-	}
-
-	void destroy_pango()
-	{
-		/* Requires linking and stuff. Live with the (not growing) memory leak for now
-		pango_cairo_font_map_set_default(NULL);
-		cairo_debug_reset_static_data();
-		FcFini();
-		*/
-	}
-
     void destroy_input()
     {
         safe_free(input.keyboard.xkb.state, xkb_state_unref);
@@ -205,9 +163,6 @@ private: /* private interface */
     void destroy_buffers()
     {
         for (auto& buffer : buffers) {
-			buffer.pango.layout.reset();
-            buffer.cairo.context.reset();
-            buffer.cairo.surface.reset();
             safe_free(buffer.buffer, wl_buffer_destroy);
             if (buffer.shm_data) {
                 munmap(buffer.shm_data, buffer.shm_size);
@@ -324,16 +279,6 @@ protected: /* meat: functions */
 
     virtual void draw(Buffer* buffer, float delta_time)
     {
-        auto& cr = *buffer->cairo.context;
-		[[maybe_unused]] auto& pg = *buffer->pango.layout;
-        [[maybe_unused]] auto& crs = *buffer->cairo.surface;
-
-        cr.save();
-        
-        cr.set_source_rgb(0, 0, 0);
-        cr.paint();
-
-        cr.restore();
     }
 
 protected: /* events */
@@ -392,14 +337,14 @@ protected: /* low-level helpers */
     void uncentered(int& x, int& y)
     {
 		double _x = x, _y = y;
-		cairo.initial_reverse_transform.transform_point(_x, _y);
+		// FIXME: cairo.initial_reverse_transform.transform_point(_x, _y);
 		x = _x; y = _y;
     }
 
     void centered(int& x, int& y)
     {
 		double _x = x, _y = y;
-		cairo.initial_transform.transform_point(_x, _y);
+		// FIXME: cairo.initial_transform.transform_point(_x, _y);
 		x = _x; y = _y;
     }
 
@@ -428,22 +373,7 @@ private: // buffer management
             }
             create_shm_buffer(buffer, width, height, WL_SHM_FORMAT_XRGB8888);
 
-			// initialize other buffer related stuff
 			on_create_buffer_pre(buffer);
-
-			{
-            auto& cr = *buffer->cairo.context;
-			cairo.initial_transform = Cairo::translation_matrix(cairo.initial_translate.x, cairo.initial_translate.y);
-			cairo.initial_transform.scale(cairo.initial_scale.x, cairo.initial_scale.y);
-			cr.set_matrix(cairo.initial_transform);
-			cairo.initial_reverse_transform = cairo.initial_transform;
-			cairo.initial_reverse_transform.invert();
-
-			auto& pg = *buffer->pango.layout;
-			auto desc = Pango::FontDescription(pango.initial_font);
-			pg.set_font_description(desc);
-			}
-
 			on_create_buffer(buffer);
         }
 
@@ -452,9 +382,7 @@ private: // buffer management
 
     void create_shm_buffer(Buffer* buffer, int width, int height, uint32_t format)
     {
-        const auto cr_format = shm_to_cairo_format(format);
-
-        const ssize_t stride = Cairo::ImageSurface::format_stride_for_width(cr_format, width);
+        const ssize_t stride = 4 * width;
         iassert(stride != -1);
         const size_t size = stride * height;
         buffer->shm_size = size;
@@ -472,11 +400,6 @@ private: // buffer management
         wl_buffer_add_listener(buffer->buffer, &buffer_listener, buffer);
         wl_shm_pool_destroy(pool);
         close(fd);
-
-		// This needs to be here
-		iassert(buffer->cairo.surface = Cairo::ImageSurface::create((unsigned char*)data, cr_format, width, height, stride));
-		iassert(buffer->cairo.context = Cairo::Context::create(buffer->cairo.surface));
-		iassert(buffer->pango.layout = Pango::Layout::create(buffer->cairo.context));
     }
 
     int create_anonymous_file(size_t size)
@@ -496,23 +419,6 @@ private: // buffer management
         }
 
         return fd;
-    }
-
-    Cairo::Surface::Format shm_to_cairo_format(uint32_t shm_format)
-    {
-        auto cr_format = static_cast<Cairo::Surface::Format>(0);
-        switch (shm_format) {
-        case WL_SHM_FORMAT_XRGB8888:
-            cr_format = Cairo::Surface::Format::RGB24;
-            break;
-        case WL_SHM_FORMAT_ARGB8888:
-            cr_format = Cairo::Surface::Format::ARGB32;
-            break;
-        default:
-            iassert(false, "Only certain wl_shm formats are supported");
-            break;
-        }
-        return cr_format;
     }
 
 public: /* listeners */
@@ -827,34 +733,6 @@ public: /* listeners */
         std::vprint_unicode(stderr, format, std::make_format_args(args...));
     }
 
-public: /* public helpers */
-    static void safe_free(auto& pointer, auto freer)
-    {
-        if (pointer) {
-            freer(pointer);
-            pointer = nullptr;
-        }
-    }
-
-    template <class... Args>
-    static void _iassert(const char* expr, std::source_location where, Args&&... args)
-    {
-        std::print(stderr, "{}:{}: {}: Assertion `{}` failed",
-            where.file_name(), where.line(), where.function_name(),
-            expr);
-        if constexpr (sizeof...(args) > 0)
-            _iassert_args(args...);
-        std::println(stderr, "");
-        throw assertion();
-    }
-
-    template <class Format, class... Args>
-    static void _iassert_args(Format&& format, Args&&... args)
-    {
-        std::print(stderr, ": ");
-        std::vprint_unicode(stderr, format, std::make_format_args(args...));
-    }
-
 public: /* public classes */
-    class assertion : public std::exception { };
+    class assertion :public assertion_base<assertion> {};
 };
