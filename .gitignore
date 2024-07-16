@@ -5,5 +5,6 @@ build-release/
 build_release/
 inc/wayland/
 src/wayland/
+vendor/*
 
 a.out
