@@ -24,6 +24,14 @@ protected: /* variables */
 			wl_pointer* pointer;
 			wl_keyboard* keyboard;
 		} seat;
+
+		struct
+		{
+			wl_surface* surface;
+			xdg_surface* xsurface;
+			xdg_toplevel* xtoplevel;
+			wl_callback* redraw_callback;
+		} window {};
     } wl {};
 
     struct
@@ -43,14 +51,6 @@ protected: /* variables */
         } keyboard;
     } input {};
 
-    struct
-    {
-        wl_surface* surface;
-        xdg_surface* xsurface;
-        xdg_toplevel* xtoplevel;
-        wl_callback* callback;
-    } window {};
-
     struct Buffer {
         wl_buffer* buffer;
         bool busy;
@@ -67,13 +67,19 @@ protected: /* variables */
 
     // internal state
     int width = 800, height = 600;
-    bool running = true;
-    bool is_initial_configured = false;
-    float elapsed_time = 0, delta_update_time = 0, delta_draw_time = 0;
+	float elapsed_time = 0;
 
-    std::chrono::high_resolution_clock::time_point tp_begin, tp_very_last;
-    std::chrono::nanoseconds duration_pause { 0 };
-    bool last_window_activated = false;
+	struct {
+		bool is_initial_configured = false;
+		bool window_last_activated = false;
+		bool running = true;
+	} state;
+
+	struct {
+		float delta_update_time = 0, delta_draw_time = 0;
+		std::chrono::high_resolution_clock::time_point tp_begin, tp_very_last;
+		std::chrono::nanoseconds duration_pause {0};
+	} timekeeping;
     // END - internal state
 	
 	// configurable
@@ -98,14 +104,14 @@ public: /* public interface */
 
     void run()
     {
-        tp_begin = tp_very_last = std::chrono::high_resolution_clock::now();
+        timekeeping.tp_begin = timekeeping.tp_very_last = std::chrono::high_resolution_clock::now();
 
         setup_pre();
         redraw(this, nullptr, 0);
         wl_display_roundtrip(wl.display);
         setup();
 
-        while (running && wl_display_dispatch(wl.display) != -1);
+        while (state.running && wl_display_dispatch(wl.display) != -1);
         
         destroy();
     }
@@ -144,15 +150,15 @@ private: /* private interface */
 
     void initialize_window()
     {
-        iassert(window.surface = wl_compositor_create_surface(wl.global.compositor));
-        iassert(window.xsurface = xdg_wm_base_get_xdg_surface(wl.global.wm_base, window.surface));
-        iassert(window.xtoplevel = xdg_surface_get_toplevel(window.xsurface));
+        iassert(wl.window.surface = wl_compositor_create_surface(wl.global.compositor));
+        iassert(wl.window.xsurface = xdg_wm_base_get_xdg_surface(wl.global.wm_base, wl.window.surface));
+        iassert(wl.window.xtoplevel = xdg_surface_get_toplevel(wl.window.xsurface));
 
-        xdg_surface_add_listener(window.xsurface, &xsurface_listener, this);
-        xdg_toplevel_add_listener(window.xtoplevel, &xtoplevel_listener, this);
+        xdg_surface_add_listener(wl.window.xsurface, &xsurface_listener, this);
+        xdg_toplevel_add_listener(wl.window.xtoplevel, &xtoplevel_listener, this);
 
-        wl_surface_commit(window.surface);
-        while (!is_initial_configured)
+        wl_surface_commit(wl.window.surface);
+        while (!state.is_initial_configured)
             wl_display_dispatch(wl.display);
     }
 
@@ -180,10 +186,10 @@ private: /* private interface */
 
     void destroy_window()
     {
-        safe_free(window.callback, wl_callback_destroy);
-        safe_free(window.xtoplevel, xdg_toplevel_destroy);
-        safe_free(window.xsurface, xdg_surface_destroy);
-        safe_free(window.surface, wl_surface_destroy);
+        safe_free(wl.window.redraw_callback, wl_callback_destroy);
+        safe_free(wl.window.xtoplevel, xdg_toplevel_destroy);
+        safe_free(wl.window.xsurface, xdg_surface_destroy);
+        safe_free(wl.window.surface, wl_surface_destroy);
     }
 
     void destroy_wayland()
@@ -201,41 +207,40 @@ public: /* external redraw */
     {
         auto app = static_cast<App*>(data);
 
-        static auto tp_last = app->tp_begin;
+        static auto tp_last = app->timekeeping.tp_begin;
         const auto tp_now = std::chrono::high_resolution_clock::now();
-        if (app-> last_window_activated) {
+        if (app->state.window_last_activated) {
             tp_last = tp_now;
-            app->last_window_activated = false;
+            app->state.window_last_activated = false;
         }
         const auto delta_time_raw = tp_now - tp_last;
         const float delta_time = std::chrono::duration_cast<std::chrono::nanoseconds>(delta_time_raw).count() / 1e9f;
         tp_last = tp_now;
 
-        app->elapsed_time = std::chrono::duration_cast<std::chrono::nanoseconds>((tp_now - app->tp_begin) - app->duration_pause).count() / 1e9f;
+        app->elapsed_time = std::chrono::duration_cast<std::chrono::nanoseconds>((tp_now - app->timekeeping.tp_begin) - app->timekeeping.duration_pause).count() / 1e9f;
 
         static float last_title_time = -1;
         if (app->elapsed_time - last_title_time > 0.25f) {
             last_title_time = app->elapsed_time;
-            xdg_toplevel_set_title(
-                app->window.xtoplevel,
-                std::format("{} - {:.3f} FPS ({:.3f}ms, {:.3f}ms, {:.3f}ms)",
+            xdg_toplevel_set_title(app->wl.window.xtoplevel,
+				std::format("{} - {:.3f} FPS ({:.3f}ms, {:.3f}ms, {:.3f}ms)",
 					app->title,
-                    1.f / delta_time,
-                    delta_time * 1e3f,
-                    app->delta_update_time * 1e3f,
-                    app->delta_draw_time * 1e3f)
-                .c_str());
+					1.f / delta_time,
+					delta_time * 1e3f,
+					app->timekeeping.delta_update_time * 1e3f,
+					app->timekeeping.delta_draw_time * 1e3f)
+				.c_str());
         }
 
         app->redraw(delta_time);
 
         if (callback)
             wl_callback_destroy(callback);
-        iassert(app->window.callback = wl_surface_frame(app->window.surface));
-        wl_callback_add_listener(app->window.callback, &redraw_listener, data);
-        wl_surface_commit(app->window.surface);
+        iassert(app->wl.window.redraw_callback = wl_surface_frame(app->wl.window.surface));
+        wl_callback_add_listener(app->wl.window.redraw_callback, &redraw_listener, data);
+        wl_surface_commit(app->wl.window.surface);
 
-        app->tp_very_last = std::chrono::high_resolution_clock::now();
+        app->timekeeping.tp_very_last = std::chrono::high_resolution_clock::now();
     }
 
 private: /* internal redraw */
@@ -252,15 +257,15 @@ private: /* internal redraw */
                 elapsed_time += sub_dt;
         }
         auto _tp_end = std::chrono::high_resolution_clock::now();
-        delta_update_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
+        timekeeping.delta_update_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
 
         _tp_begin = std::chrono::high_resolution_clock::now();
         draw(buffer, delta_time);
         _tp_end = std::chrono::high_resolution_clock::now();
-        delta_draw_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
+        timekeeping.delta_draw_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
 
-        wl_surface_attach(window.surface, buffer->buffer, 0, 0);
-        wl_surface_damage_buffer(window.surface, 0, 0, width, height);
+        wl_surface_attach(wl.window.surface, buffer->buffer, 0, 0);
+        wl_surface_damage_buffer(wl.window.surface, 0, 0, width, height);
     }
 
 private: /* meat: variables */
@@ -441,7 +446,7 @@ public: /* listeners */
         // log_event(__func__, "{}", serial);
 
         auto app = static_cast<App*>(data);
-        app->is_initial_configured = true;
+        app->state.is_initial_configured = true;
 
         xdg_surface_ack_configure(xsurface, serial);
     }
@@ -457,15 +462,14 @@ public: /* listeners */
              ptr++) {
             switch (*ptr) {
             case XDG_TOPLEVEL_STATE_ACTIVATED: {
-                app->last_window_activated = true;
+                app->state.window_last_activated = true;
 
                 const auto tp_now = std::chrono::high_resolution_clock::now();
-                const auto
-                    duration_total
-                    = tp_now - app->tp_begin,
-                    duration_last_pause = app->tp_very_last - app->tp_begin;
+                const auto duration_total
+                    = tp_now - app->timekeeping.tp_begin,
+                    duration_last_pause = app->timekeeping.tp_very_last - app->timekeeping.tp_begin;
 
-                app->duration_pause += duration_total - duration_last_pause;
+                app->timekeeping.duration_pause += duration_total - duration_last_pause;
             } break;
 
             default:
@@ -478,14 +482,14 @@ public: /* listeners */
             app->height = height;
             app->rebuild_buffers = true;
         }
-        app->is_initial_configured = false;
+        app->state.is_initial_configured = false;
     }
     static void on_xtoplevel_close(void* data, xdg_toplevel* xtoplevel)
     {
         // log_event(__func__);
 
         auto app = static_cast<App*>(data);
-        app->running = false;
+        app->state.running = false;
     }
 
     static void on_buffer_release(void* data, wl_buffer* buffer)
