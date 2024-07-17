@@ -9,6 +9,7 @@
 #include <source_location>
 #include <string_view>
 #include <unordered_map>
+#include <type_traits>
 
 #include <fcntl.h>
 #include <linux/input-event-codes.h>

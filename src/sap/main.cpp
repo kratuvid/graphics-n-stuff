@@ -1,6 +1,6 @@
 #include "app.hpp"
 
-class Sap : public App
+class Sap : public App<BackendShm>
 {
 public:
 	Sap()
@@ -12,36 +12,22 @@ public:
 	}
 
 private:
-	void initialize_pre() override
-	{
-		title = "Sap";
-	}
-
-	void setup_pre() override
-	{
-	}
-
 	void setup() override
 	{
-	}
-
-	void initialize_variables()
-	{
+		title = "Sap";
 	}
 
 	void update(float delta_time) override
 	{
 	}
 
-	void draw(Buffer* buffer, float delta_time) override
+	void draw(float delta_time) override
 	{
+		auto buffer = backend->next_buffer();
+		backend->present();
 	}
 
 private:
-	void on_create_buffer(Buffer* buffer) override
-	{
-	}
-
 	void on_click(uint32_t button, uint32_t state) override
 	{
 	}
@@ -60,9 +46,9 @@ int main(int argc, char** argv)
 
     Sap app;
     try {
-        app.initialize();
+        app.init();
         app.run();
-    } catch (const App::assertion&) {
+    } catch (const assertion&) {
         return 1;
     } catch (const std::exception& e) {
         std::println(stderr, "Fatal std::exception: {}", e.what());

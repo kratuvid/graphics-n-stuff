@@ -1,38 +1,15 @@
 #pragma once
 
 #include "pch.hpp"
+#include "backend-shm.hpp"
 #include "utility.hpp"
 
-#define iassert(expr, ...) iassert_base(App::assertion, expr __VA_OPT__(, ) __VA_ARGS__);
-
+template<class TBackend>
+  requires std::is_base_of_v<Backend, TBackend>
 class App
 {
-protected: /* variables */
-    struct
-    {
-		wl_display* display;
-		wl_registry* registry;
-
-		struct {
-			wl_compositor* compositor;
-			xdg_wm_base* wm_base;
-			wl_shm* shm;
-			wl_seat* seat;
-		} global;
-
-		struct {
-			wl_pointer* pointer;
-			wl_keyboard* keyboard;
-		} seat;
-
-		struct
-		{
-			wl_surface* surface;
-			xdg_surface* xsurface;
-			xdg_toplevel* xtoplevel;
-			wl_callback* redraw_callback;
-		} window {};
-    } wl {};
+protected: // variables
+	struct Wayland wl {};
 
     struct
     {
@@ -51,26 +28,7 @@ protected: /* variables */
         } keyboard;
     } input {};
 
-    struct Buffer {
-        wl_buffer* buffer;
-        bool busy;
-        union {
-            void* shm_data;
-            uint32_t* shm_data_u32;
-            uint8_t* shm_data_u8;
-        };
-        size_t shm_size;
-    } buffers[2] {};
-
-    bool rebuild_buffers = false;
-    // END - wayland
-
-    // internal state
-    int width = 800, height = 600;
-	float elapsed_time = 0;
-
 	struct {
-		bool is_initial_configured = false;
 		bool window_last_activated = false;
 		bool running = true;
 	} state;
@@ -80,40 +38,43 @@ protected: /* variables */
 		std::chrono::high_resolution_clock::time_point tp_begin, tp_very_last;
 		std::chrono::nanoseconds duration_pause {0};
 	} timekeeping;
-    // END - internal state
-	
-	// configurable
-    std::string_view title {"App!"};
+
+    int width = 800, height = 600;
+	float elapsed_time = 0;
+
+	std::unique_ptr<TBackend> backend;
+
+	// standard configuration
+    std::string_view title = "App!";
     unsigned substeps = 1;
-	// END - configurable
 
-public: /* public interface */
-    void initialize()
-    {
-		initialize_pre();
-
+public: // public interface
+	App()
+		:backend(std::make_unique<TBackend>(&wl, &width, &height))
+	{
         srand(time(nullptr));
-        initialize_wayland();
-        initialize_window();
+	}
 
-		initialize_post();
+    void init()
+    {
+		init_core();
+		init_window();
+		backend->init();
     }
-
-	virtual void initialize_pre() {}
-	virtual void initialize_post() {}
 
     void run()
     {
         timekeeping.tp_begin = timekeeping.tp_very_last = std::chrono::high_resolution_clock::now();
 
-        setup_pre();
-        redraw(this, nullptr, 0);
-        wl_display_roundtrip(wl.display);
-        setup();
+		setup();
+
+		// Kickstart redraw
+		redraw(1e-3f); // expecting a backend->present in here
+		iassert(wl.window.redraw_callback = wl_surface_frame(wl.window.surface));
+		wl_callback_add_listener(wl.window.redraw_callback, &redraw_listener, this);
+		wl_surface_commit(wl.window.surface);
 
         while (state.running && wl_display_dispatch(wl.display) != -1);
-        
-        destroy();
     }
 
     ~App()
@@ -127,14 +88,14 @@ public: /* public interface */
         if (getrusage(RUSAGE_CHILDREN, &usage) == 0 && usage.ru_maxrss != 0)
             spdlog::info("Peak children RSS usage: {:.3f} MB", usage.ru_maxrss / 1024.0);
 
+		backend.reset();
         destroy_input();
-        destroy_buffers();
-        destroy_window();
-        destroy_wayland();
+		destroy_window();
+		destroy_core();
     }
 
-private: /* private interface */
-    void initialize_wayland()
+private: // private interface
+    void init_core()
     {
         iassert(wl.display = wl_display_connect(nullptr));
         iassert(wl.registry = wl_display_get_registry(wl.display));
@@ -146,10 +107,10 @@ private: /* private interface */
         iassert(wl.global.shm);
         iassert(wl.global.seat);
         wl_display_roundtrip(wl.display);
-    }
+	}
 
-    void initialize_window()
-    {
+	void init_window()
+	{
         iassert(wl.window.surface = wl_compositor_create_surface(wl.global.compositor));
         iassert(wl.window.xsurface = xdg_wm_base_get_xdg_surface(wl.global.wm_base, wl.window.surface));
         iassert(wl.window.xtoplevel = xdg_surface_get_toplevel(wl.window.xsurface));
@@ -158,8 +119,7 @@ private: /* private interface */
         xdg_toplevel_add_listener(wl.window.xtoplevel, &xtoplevel_listener, this);
 
         wl_surface_commit(wl.window.surface);
-        while (!state.is_initial_configured)
-            wl_display_dispatch(wl.display);
+		wl_display_roundtrip(wl.display);
     }
 
     void destroy_input()
@@ -171,29 +131,16 @@ private: /* private interface */
         safe_free(wl.seat.pointer, wl_pointer_destroy);
     }
 
-    void destroy_buffers()
-    {
-        for (auto& buffer : buffers) {
-            safe_free(buffer.buffer, wl_buffer_destroy);
-            if (buffer.shm_data) {
-                munmap(buffer.shm_data, buffer.shm_size);
-                buffer.shm_data = nullptr;
-            }
-            buffer.shm_size = 0;
-            buffer.busy = false;
-        }
-    }
-
     void destroy_window()
     {
         safe_free(wl.window.redraw_callback, wl_callback_destroy);
         safe_free(wl.window.xtoplevel, xdg_toplevel_destroy);
         safe_free(wl.window.xsurface, xdg_surface_destroy);
         safe_free(wl.window.surface, wl_surface_destroy);
-    }
+	}
 
-    void destroy_wayland()
-    {
+	void destroy_core()
+	{
         safe_free(wl.global.seat, wl_seat_destroy);
         safe_free(wl.global.shm, wl_shm_destroy);
         safe_free(wl.global.wm_base, xdg_wm_base_destroy);
@@ -202,22 +149,24 @@ private: /* private interface */
         safe_free(wl.display, wl_display_disconnect);
     }
 
-public: /* external redraw */
+public: // external redraw
     static void redraw(void* data, wl_callback* callback, uint32_t _time)
     {
+		using namespace std::chrono;
+
         auto app = static_cast<App*>(data);
 
         static auto tp_last = app->timekeeping.tp_begin;
-        const auto tp_now = std::chrono::high_resolution_clock::now();
+        const auto tp_now = high_resolution_clock::now();
         if (app->state.window_last_activated) {
             tp_last = tp_now;
             app->state.window_last_activated = false;
         }
         const auto delta_time_raw = tp_now - tp_last;
-        const float delta_time = std::chrono::duration_cast<std::chrono::nanoseconds>(delta_time_raw).count() / 1e9f;
+        const float delta_time = duration_cast<nanoseconds>(delta_time_raw).count() / 1e9f;
         tp_last = tp_now;
 
-        app->elapsed_time = std::chrono::duration_cast<std::chrono::nanoseconds>((tp_now - app->timekeeping.tp_begin) - app->timekeeping.duration_pause).count() / 1e9f;
+        app->elapsed_time = duration_cast<nanoseconds>((tp_now - app->timekeeping.tp_begin) - app->timekeeping.duration_pause).count() / 1e9f;
 
         static float last_title_time = -1;
         if (app->elapsed_time - last_title_time > 0.25f) {
@@ -234,64 +183,41 @@ public: /* external redraw */
 
         app->redraw(delta_time);
 
-        if (callback)
-            wl_callback_destroy(callback);
+		wl_callback_destroy(callback);
         iassert(app->wl.window.redraw_callback = wl_surface_frame(app->wl.window.surface));
         wl_callback_add_listener(app->wl.window.redraw_callback, &redraw_listener, data);
         wl_surface_commit(app->wl.window.surface);
 
-        app->timekeeping.tp_very_last = std::chrono::high_resolution_clock::now();
+        app->timekeeping.tp_very_last = high_resolution_clock::now();
     }
 
-private: /* internal redraw */
+private: // internal redraw
     void redraw(float delta_time)
     {
-        auto buffer = next_buffer();
-        iassert(buffer);
+		using namespace std::chrono;
 
-        auto _tp_begin = std::chrono::high_resolution_clock::now();
+        auto _tp_begin = high_resolution_clock::now();
         const float sub_dt = delta_time / substeps;
         for (unsigned i = 0; i < substeps; i++) {
             update(sub_dt);
             if (i != substeps - 1)
                 elapsed_time += sub_dt;
         }
-        auto _tp_end = std::chrono::high_resolution_clock::now();
-        timekeeping.delta_update_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
+        auto _tp_end = high_resolution_clock::now();
+        timekeeping.delta_update_time = duration_cast<nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
 
-        _tp_begin = std::chrono::high_resolution_clock::now();
-        draw(buffer, delta_time);
-        _tp_end = std::chrono::high_resolution_clock::now();
-        timekeeping.delta_draw_time = std::chrono::duration_cast<std::chrono::nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
-
-        wl_surface_attach(wl.window.surface, buffer->buffer, 0, 0);
-        wl_surface_damage_buffer(wl.window.surface, 0, 0, width, height);
+        _tp_begin = high_resolution_clock::now();
+        draw(delta_time);
+        _tp_end = high_resolution_clock::now();
+        timekeeping.delta_draw_time = duration_cast<nanoseconds>(_tp_end - _tp_begin).count() / 1e9f;
     }
 
-private: /* meat: variables */
+protected: // user facing stuff
+    virtual void setup() = 0;
+    virtual void update(float delta_time) = 0;
+    virtual void draw(float delta_time) = 0;
 
-protected: /* meat: functions */
-    virtual void setup_pre()
-    {
-    }
-
-    virtual void setup()
-    {
-    }
-    
-    virtual void destroy()
-    {
-    }
-
-    virtual void update(float delta_time)
-    {
-    }
-
-    virtual void draw(Buffer* buffer, float delta_time)
-    {
-    }
-
-protected: /* events */
+protected: // events
 	virtual void on_click(uint32_t button, uint32_t state)
 	{
 	}
@@ -300,111 +226,11 @@ protected: /* events */
 	{
 	}
 
-	virtual void on_create_buffer_pre(Buffer* buffer)
+	virtual void on_configure(wl_array* states)
 	{
 	}
 
-	virtual void on_create_buffer(Buffer* buffer)
-	{
-	}
-
-protected: /* low-level helpers */
-    void pixel_range(Buffer* buffer, int x, int y, int ex, int ey, uint32_t color)
-    {
-        x = std::clamp(x, 0, width - 1);
-        y = std::clamp(y, 0, height - 1);
-        ex = std::clamp(ex + 1, 0, width - 1);
-        ey = std::clamp(ey, 0, height - 1);
-        const auto location = at(x, y), location_end = at(ex, ey);
-        if (location <= location_end)
-            std::fill(&buffer->shm_data_u32[location], &buffer->shm_data_u32[location_end], color);
-    }
-
-    uint32_t& pixel_at(Buffer* buffer, int x, int y)
-    {
-        static uint32_t facade;
-        if ((x < 0 or x >= width) or (y < 0 or y >= height)) {
-            facade = 0;
-            return facade;
-        }
-        const ssize_t location = at(x, y);
-        return buffer->shm_data_u32[location];
-    }
-
-    ssize_t at(int x, int y)
-    {
-        return (y * width) + x;
-    }
-
-private: // buffer management
-    Buffer* next_buffer()
-    {
-        Buffer* buffer = nullptr;
-
-        for (auto& one : buffers) {
-            if (!one.busy) {
-                buffer = &one;
-                break;
-            }
-        }
-        iassert(buffer);
-
-        if (!buffer->buffer || rebuild_buffers) {
-            if (rebuild_buffers) {
-                destroy_buffers();
-                rebuild_buffers = false;
-            }
-            create_shm_buffer(buffer, width, height, WL_SHM_FORMAT_XRGB8888);
-
-			on_create_buffer_pre(buffer);
-			on_create_buffer(buffer);
-        }
-
-        return buffer;
-    }
-
-    void create_shm_buffer(Buffer* buffer, int width, int height, uint32_t format)
-    {
-        const ssize_t stride = 4 * width;
-        iassert(stride != -1);
-        const size_t size = stride * height;
-        buffer->shm_size = size;
-
-        int fd;
-        iassert((fd = create_anonymous_file(size)) > 0);
-
-        void* data;
-        iassert(data = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
-        buffer->shm_data = data;
-
-        wl_shm_pool* pool;
-        iassert(pool = wl_shm_create_pool(wl.global.shm, fd, size));
-        iassert(buffer->buffer = wl_shm_pool_create_buffer(pool, 0, width, height, stride, format));
-        wl_buffer_add_listener(buffer->buffer, &buffer_listener, buffer);
-        wl_shm_pool_destroy(pool);
-        close(fd);
-    }
-
-    int create_anonymous_file(size_t size)
-    {
-        int fd, ret;
-
-        fd = memfd_create("opengl-studies", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-        if (fd > 0) {
-            fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK);
-            do {
-                ret = ftruncate(fd, size);
-            } while (ret < 0 && errno == EINTR);
-            if (ret < 0) {
-                close(fd);
-                return -1;
-            }
-        }
-
-        return fd;
-    }
-
-public: /* listeners */
+public: // listeners
     static void on_registry_global(void* data, wl_registry* registry, uint32_t name, const char* interface, uint32_t version)
     {
         // log_event(__func__, "{} v{}", interface, version);
@@ -445,9 +271,6 @@ public: /* listeners */
     {
         // log_event(__func__, "{}", serial);
 
-        auto app = static_cast<App*>(data);
-        app->state.is_initial_configured = true;
-
         xdg_surface_ack_configure(xsurface, serial);
     }
 
@@ -477,12 +300,16 @@ public: /* listeners */
             }
         }
 
-        if (!((width == 0 || height == 0) || (width == app->width && height == app->height))) {
+		const bool choose_dimensions = width == 0 or height == 0;
+		bool new_dimensions = choose_dimensions;
+
+        if (!(choose_dimensions or (width == app->width && height == app->height))) {
             app->width = width;
             app->height = height;
-            app->rebuild_buffers = true;
+			new_dimensions = true;
         }
-        app->state.is_initial_configured = false;
+
+		app->backend->on_configure(new_dimensions, states);
     }
     static void on_xtoplevel_close(void* data, xdg_toplevel* xtoplevel)
     {
@@ -490,14 +317,6 @@ public: /* listeners */
 
         auto app = static_cast<App*>(data);
         app->state.running = false;
-    }
-
-    static void on_buffer_release(void* data, wl_buffer* buffer)
-    {
-        // log_event(__func__, "{}", data);
-
-        auto current_buffer = static_cast<Buffer*>(data);
-        current_buffer->busy = false;
     }
 
     static void on_seat_capabilities(void* data, wl_seat* seat, uint32_t caps)
@@ -666,9 +485,6 @@ public: /* listeners */
         .configure = on_xtoplevel_configure,
         .close = on_xtoplevel_close
     };
-    static constexpr wl_buffer_listener buffer_listener {
-        .release = on_buffer_release
-    };
     static constexpr wl_callback_listener redraw_listener {
         .done = redraw
     };
@@ -695,22 +511,4 @@ public: /* listeners */
         .modifiers = on_keyboard_modifiers,
         .repeat_info = on_keyboard_repeat_info
     };
-
-    template <class... Args>
-    static void log_event(const char* function, Args&&... args)
-    {
-        std::print(stderr, "event {}", function);
-        if constexpr (sizeof...(args) > 0)
-            _log_event_args(args...);
-        std::println("");
-    }
-    template <class Format, class... Args>
-    static void _log_event_args(Format&& format, Args&&... args)
-    {
-        std::print(stderr, ": ");
-        std::vprint_unicode(stderr, format, std::make_format_args(args...));
-    }
-
-public: /* public classes */
-    class assertion :public assertion_base<assertion> {};
 };
