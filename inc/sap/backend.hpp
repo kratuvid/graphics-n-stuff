@@ -16,5 +16,4 @@ public:
 
 	virtual void init() = 0;
 	virtual void on_configure(bool new_dimensions, wl_array* states) = 0;
-	virtual void present() = 0;
 };

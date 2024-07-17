@@ -104,7 +104,7 @@ public:
 		}
 	}
 
-	void present() override
+	void present()
 	{
 		// TODO: Rebuild context with lost
 		eglSwapBuffers(display, surface);

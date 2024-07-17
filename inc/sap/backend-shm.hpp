@@ -17,7 +17,7 @@ private:
             uint32_t* data_u32;
         };
         size_t size;
-    } buffers[2] {}, *current_buffer = nullptr;
+    } buffers[2] {};
 
 public:
 	BackendSHM(const Wayland* pwl, const int* pwidth, const int* pheight)
@@ -39,9 +39,9 @@ public:
 		}
 	}
 
-	void present() override
+	void present(Buffer* buffer)
 	{
-        wl_surface_attach(pwl->window.surface, current_buffer->object, 0, 0);
+        wl_surface_attach(pwl->window.surface, buffer->object, 0, 0);
         wl_surface_damage_buffer(pwl->window.surface, 0, 0, *pwidth, *pheight);
 		wl_surface_commit(pwl->window.surface);
 	}
@@ -64,7 +64,6 @@ public:
 
 		buffer->busy = true;
 
-		current_buffer = buffer;
         return buffer;
     }
 
