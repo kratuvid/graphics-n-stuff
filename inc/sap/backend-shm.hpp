@@ -4,7 +4,7 @@
 #include "backend.hpp"
 #include "utility.hpp"
 
-class BackendShm : public Backend
+class BackendSHM : public Backend
 {
 private:
     struct Buffer {
@@ -20,10 +20,10 @@ private:
     } buffers[2] {}, *current_buffer = nullptr;
 
 public:
-	BackendShm(const Wayland* pwayland, const int* pwidth, const int* pheight)
-		:Backend(pwayland, pwidth, pheight) {}
+	BackendSHM(const Wayland* pwl, const int* pwidth, const int* pheight)
+		:Backend(pwl, pwidth, pheight) {}
 
-	~BackendShm() override
+	~BackendSHM() override
 	{
 		destroy_buffers();
 	}
@@ -41,9 +41,9 @@ public:
 
 	void present() override
 	{
-        wl_surface_attach(pwayland->window.surface, current_buffer->object, 0, 0);
-        wl_surface_damage_buffer(pwayland->window.surface, 0, 0, *pwidth, *pheight);
-		wl_surface_commit(pwayland->window.surface);
+        wl_surface_attach(pwl->window.surface, current_buffer->object, 0, 0);
+        wl_surface_damage_buffer(pwl->window.surface, 0, 0, *pwidth, *pheight);
+		wl_surface_commit(pwl->window.surface);
 	}
 
     Buffer* next_buffer()
@@ -104,7 +104,7 @@ private:
         buffer->data = data;
 
         wl_shm_pool* pool;
-        iassert(pool = wl_shm_create_pool(pwayland->global.shm, fd, size));
+        iassert(pool = wl_shm_create_pool(pwl->global.shm, fd, size));
         iassert(buffer->object = wl_shm_pool_create_buffer(pool, 0, width, height, stride, format));
         wl_buffer_add_listener(buffer->object, &buffer_listener, buffer);
         wl_shm_pool_destroy(pool);

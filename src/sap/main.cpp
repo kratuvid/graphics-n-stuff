@@ -1,6 +1,8 @@
 #include "app.hpp"
+#include "backend-shm.hpp"
+#include "backend-egl.hpp"
 
-class Sap : public App<BackendShm>
+class Sap : public App<BackendEGL>
 {
 public:
 	Sap()
@@ -23,7 +25,12 @@ private:
 
 	void draw(float delta_time) override
 	{
+		/*
 		auto buffer = backend->next_buffer();
+		memset(buffer->data, 0xee, buffer->size);
+		*/
+		glClearColor(1, 0, 0, 1);
+		glClear(GL_COLOR_BUFFER_BIT);
 		backend->present();
 	}
 

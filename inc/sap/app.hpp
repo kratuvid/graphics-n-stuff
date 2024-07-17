@@ -1,7 +1,7 @@
 #pragma once
 
 #include "pch.hpp"
-#include "backend-shm.hpp"
+#include "backend.hpp"
 #include "utility.hpp"
 
 template<class TBackend>
@@ -60,6 +60,8 @@ public: // public interface
 		init_core();
 		init_window();
 		backend->init();
+
+		wl_display_roundtrip(wl.display);
     }
 
     void run()
@@ -119,7 +121,6 @@ private: // private interface
         xdg_toplevel_add_listener(wl.window.xtoplevel, &xtoplevel_listener, this);
 
         wl_surface_commit(wl.window.surface);
-		wl_display_roundtrip(wl.display);
     }
 
     void destroy_input()
@@ -226,7 +227,7 @@ protected: // events
 	{
 	}
 
-	virtual void on_configure(wl_array* states)
+	virtual void on_configure(bool new_dimensions, wl_array* states)
 	{
 	}
 
@@ -310,6 +311,7 @@ public: // listeners
         }
 
 		app->backend->on_configure(new_dimensions, states);
+		app->on_configure(new_dimensions, states);
     }
     static void on_xtoplevel_close(void* data, xdg_toplevel* xtoplevel)
     {

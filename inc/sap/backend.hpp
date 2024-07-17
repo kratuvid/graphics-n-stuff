@@ -6,12 +6,12 @@
 class Backend
 {
 protected:
-	const Wayland* pwayland = nullptr;
+	const Wayland* pwl = nullptr;
 	const int *pwidth = nullptr, *pheight = nullptr;
 
 public:
-	Backend(const Wayland* pwayland, const int* pwidth, const int* pheight)
-		:pwayland(pwayland), pwidth(pwidth), pheight(pheight) {}
+	Backend(const Wayland* pwl, const int* pwidth, const int* pheight)
+		:pwl(pwl), pwidth(pwidth), pheight(pheight) {}
 	virtual ~Backend() {};
 
 	virtual void init() = 0;
