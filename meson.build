@@ -1,11 +1,11 @@
 project('opengl-studies', 'c', 'cpp', default_options: ['c_std=c23', 'cpp_std=c++23', 'b_lto=true'])
-args_base = ['-pipe']
+args_base = ['-pipe', '-march=native']
 if get_option('buildtype').startswith('debug')
   args = args_base + ['-DDEBUG']
   add_project_arguments(args, language: 'cpp')
   add_project_link_arguments(args, language: 'cpp')
 else
-  args = args_base + ['-DNDEBUG', '-Ofast', '-march=native', '-fomit-frame-pointer']
+  args = args_base + ['-DNDEBUG', '-Ofast', '-fomit-frame-pointer']
   add_project_arguments(args, language: 'cpp')
   add_project_link_arguments(args, language: 'cpp')
 endif

@@ -94,6 +94,10 @@ public:
 		iassert(eglMakeCurrent(display, surface, surface, context));
 
 		iassert(gladLoadGLLoader((GLADloadproc)eglGetProcAddress) != 0);
+
+		glEnable(GL_DEPTH_TEST);
+
+		glDebugMessageCallback(debug_callback, nullptr);
 	}
 
 	void on_configure(bool new_dimensions, wl_array* states) override
@@ -113,6 +117,11 @@ public:
 private:
 	static void egl_debug_callback(EGLenum error, const char* command, EGLint type, EGLLabelKHR, EGLLabelKHR, const char* message)
 	{
-		std::println(stderr, "{}: error: {:#x}, type: {:#x}: {}", command, error, type, message);
+		std::println(stderr, "EGL Debug: command: {}, error: {:#x}, type: {:#x}: {}", command, error, type, message);
+	}
+
+	static void debug_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* message, const void* data)
+	{
+		std::println(stderr, "GL Debug: source: {:#x}, type: {:#x}, id: {:#x}, severity: {:#x}: {}", source, type, id, severity, message);
 	}
 };

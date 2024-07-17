@@ -45,7 +45,7 @@ protected: // variables
 	std::unique_ptr<TBackend> backend;
 
 	// standard configuration
-    std::string_view title = "App!";
+    std::string title = "App!";
     unsigned substeps = 1;
 
 public: // public interface
