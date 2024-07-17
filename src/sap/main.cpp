@@ -4,15 +4,6 @@
 
 class Sap : public App<BackendEGL>
 {
-public:
-	Sap()
-	{
-	}
-
-	~Sap()
-	{
-	}
-
 private:
 	void setup() override
 	{
@@ -25,17 +16,13 @@ private:
 
 	void draw(float delta_time) override
 	{
-		/*
-		auto buffer = backend->next_buffer();
-		memset(buffer->data, 0xee, buffer->size);
-		*/
 		glClearColor(1, 0, 0, 1);
 		glClear(GL_COLOR_BUFFER_BIT);
 		backend->present();
 	}
 
 private:
-	void on_click(uint32_t button, uint32_t state) override
+	void on_click(uint32_t button, wl_pointer_button_state state) override
 	{
 	}
 

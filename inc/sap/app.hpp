@@ -219,7 +219,7 @@ protected: // user facing stuff
     virtual void draw(float delta_time) = 0;
 
 protected: // events
-	virtual void on_click(uint32_t button, uint32_t state)
+	virtual void on_click(uint32_t button, wl_pointer_button_state state)
 	{
 	}
 
@@ -387,7 +387,7 @@ public: // listeners
             break;
         }
 
-		app->on_click(button, state);
+		app->on_click(button, static_cast<wl_pointer_button_state>(state));
     }
     static void on_pointer_axis(void* data, wl_pointer* pointer, uint32_t time, uint32_t axis, wl_fixed_t value)
     {
