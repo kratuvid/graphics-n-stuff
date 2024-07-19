@@ -13,7 +13,7 @@ class Sap : public App<BackendEGL>
 	std::vector<float> image;
 	int iwidth, iheight;
 
-	std::atomic_bool is_uploaded = true;
+	bool is_uploaded = true;
 	
 public:
 	Sap()
@@ -253,14 +253,17 @@ private:
 		vp_topleft = vp_pos + (-cam_right * vp_size.x * 0.5f + cam_up * vp_size.y * 0.5f);
 		vp_delta = vp_size / glm::vec2(iwidth, iheight);
 
+		spheres[0]->pos.x = glm::cos(elapsed_time) * 2.f;
+		spheres[0]->pos.z = glm::sin(elapsed_time) * 3.f;
 		/*
-		spheres[0].pos.x = glm::sin(elapsed_time);
 		spheres[1].pos.y = glm::sin(elapsed_time);
 		spheres[2].pos.z = glm::sin(elapsed_time);
 		*/
 
-		light.pos.x = glm::sin(elapsed_time) * 20.f;
-		light.pos.z = 1;
+		// light.pos.x = glm::cos(elapsed_time) * 10.f;
+		// light.pos.z = glm::sin(elapsed_time) * 10.f;
+		light.pos.z = 5.f;
+		// light.pos.y = 10.f + glm::sin(elapsed_time) * 5.f;
 		
 		const float factor = delta_time * 2;
 		if (input.keyboard.map_utf['1']) cam_pos.x -= factor;
