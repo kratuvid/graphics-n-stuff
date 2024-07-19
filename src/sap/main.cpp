@@ -108,12 +108,21 @@ private:
 		glClearColor(0, 0, 0, 1);
 		glDisable(GL_DEPTH_TEST);
 
-		renderer = std::jthread([this](std::stop_token stoken) {
-			this->pre_render();
-			this->render(stoken);
-		});
-
 		setup_render();
+
+		const int nthreads = std::thread::hardware_concurrency();
+		const int slice = iheight / nthreads;
+		const int slice_left = iheight % nthreads;
+		for (int start_row = 0; start_row < iheight - slice_left; start_row += slice)
+		{
+			int end_row = start_row + slice - 1;
+			if (renderers.size() == nthreads-1)
+				end_row = iheight - 1;
+
+			renderers.emplace_back([this, start_row, end_row](std::stop_token stoken) {
+				this->render(stoken, start_row, end_row);
+			});
+		}
 	}
 
 	void draw(float delta_time) override
@@ -198,7 +207,7 @@ private:
 	std::vector<std::unique_ptr<Sphere>> spheres;
 	std::vector<std::pair<ShapeType, const Shape*>> scene;
 
-	std::jthread renderer;
+	std::vector<std::jthread> renderers;
 
 	glm::vec3 cam_pos, cam_dir, cam_up, cam_right;
 	float focal_length;
@@ -262,16 +271,22 @@ private:
 		if (input.keyboard.map_utf['6']) cam_pos.z += factor;
 		if (input.keyboard.map_utf['7']) fov -= factor;
 		if (input.keyboard.map_utf['8']) fov += factor;
+		if (input.keyboard.map_utf['w']) cam_pos += cam_dir * factor;
+		if (input.keyboard.map_utf['s']) cam_pos -= cam_dir * factor;
+		if (input.keyboard.map_utf['a']) cam_pos -= cam_right * factor;
+		if (input.keyboard.map_utf['d']) cam_pos += cam_right * factor;
+		if (input.keyboard.map_utf['q']) cam_pos += cam_up * factor;
+		if (input.keyboard.map_utf['e']) cam_pos -= cam_up * factor;
 	}
 	
-	void render(std::stop_token stoken)
+	void render(std::stop_token stoken, int start_row, int end_row)
 	{
 		while (!stoken.stop_requested())
 		{
 			auto tp_begin = std::chrono::high_resolution_clock::now();
 
-			size_t location = 0;
-			for (int j = 0; j < iheight; j++)
+			size_t location = start_row * iwidth + 0;
+			for (int j = start_row; j <= end_row; j++)
 			{
 				for (int i = 0; i < iwidth; i++, location++)
 				{
@@ -394,8 +409,6 @@ private:
 
 		return true;
 	}
-
-	void pre_render() {}
 
 private:
 	void on_click(uint32_t button, wl_pointer_button_state state) override
