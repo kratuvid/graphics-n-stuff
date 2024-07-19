@@ -189,6 +189,11 @@ private:
 		{}
 	};
 
+	struct {
+		glm::vec3 color;
+		glm::vec3 pos;
+	} light;
+
 	std::vector<std::unique_ptr<Circle>> circles;
 	std::vector<std::unique_ptr<Sphere>> spheres;
 	std::vector<std::pair<ShapeType, const Shape*>> scene;
@@ -199,11 +204,15 @@ private:
 	float focal_length;
 
 	float aspect_ratio;
+	float fov; // vertical fov
 	glm::vec3 vp_pos, vp_topleft;
 	glm::vec2 vp_size, vp_delta;
 
 	void setup_render()
 	{
+		light.color = {1, 1, 1};
+		light.pos = glm::vec3(0, 1, 0) * 10.f;
+
  		circles.emplace_back(std::make_unique<Circle>(glm::vec3(1, 1, 1), glm::vec3(0, 1, 0), glm::vec3(0, 0, 0), 4));
 		spheres.emplace_back(std::make_unique<Sphere>(glm::vec3(1, 0, 0), glm::vec3(0, 0.5, 0), 0.5));
 		spheres.emplace_back(std::make_unique<Sphere>(glm::vec3(0, 1, 0), glm::vec3(1, 0.5, 0), 0.5));
@@ -216,6 +225,8 @@ private:
 
 		cam_pos = {2, 2, -2};
 		focal_length = 1.0f;
+		aspect_ratio = float(iwidth) / iheight;
+		fov = glm::radians(135.f / 2);
 	}
 
 	void update(float delta_time) override
@@ -226,9 +237,10 @@ private:
 		cam_up = glm::normalize(glm::cross(cam_dir, t));
 		cam_right = glm::normalize(glm::cross(cam_dir, cam_up));
 
-		aspect_ratio = float(iwidth) / iheight;
 		vp_pos = cam_pos + focal_length * cam_dir;
-		vp_size = glm::vec2(2 * aspect_ratio, 2);
+		// vp_size = glm::vec2(2 * aspect_ratio, 2);
+		vp_size.y = 2 * focal_length * glm::tan(fov / 2);
+		vp_size.x = vp_size.y * aspect_ratio;
 		vp_topleft = vp_pos + (-cam_right * vp_size.x * 0.5f + cam_up * vp_size.y * 0.5f);
 		vp_delta = vp_size / glm::vec2(iwidth, iheight);
 
@@ -237,6 +249,9 @@ private:
 		spheres[1].pos.y = glm::sin(elapsed_time);
 		spheres[2].pos.z = glm::sin(elapsed_time);
 		*/
+
+		light.pos.x = glm::sin(elapsed_time) * 20.f;
+		light.pos.z = 1;
 		
 		const float factor = delta_time * 2;
 		if (input.keyboard.map_utf['1']) cam_pos.x -= factor;
@@ -245,14 +260,16 @@ private:
 		if (input.keyboard.map_utf['4']) cam_pos.y += factor;
 		if (input.keyboard.map_utf['5']) cam_pos.z -= factor;
 		if (input.keyboard.map_utf['6']) cam_pos.z += factor;
-		if (input.keyboard.map_utf['7']) focal_length -= factor;
-		if (input.keyboard.map_utf['8']) focal_length += factor;
+		if (input.keyboard.map_utf['7']) fov -= factor;
+		if (input.keyboard.map_utf['8']) fov += factor;
 	}
 	
 	void render(std::stop_token stoken)
 	{
 		while (!stoken.stop_requested())
 		{
+			auto tp_begin = std::chrono::high_resolution_clock::now();
+
 			size_t location = 0;
 			for (int j = 0; j < iheight; j++)
 			{
@@ -267,32 +284,52 @@ private:
 					}
 
 					const Shape* object = nullptr;
-					glm::vec3 point, normal;
+					glm::vec3 point, normal, _p, _n;
 
 					auto min_dist = std::numeric_limits<float>::max();
 
 					for (auto [type, obj] : scene)
 					{
-						glm::vec3 _point, _normal;
-						if (hit(prim_ray, type, obj, _point, _normal)) {
-							const float dist_sq = glm::distance2(cam_pos, _point);
+						if (hit(prim_ray, type, obj, _p, _n)) {
+							const float dist_sq = glm::distance2(cam_pos, _p);
 							if (dist_sq < min_dist) {
 								object = obj;
-								point = _point;
-								normal = _normal;
+								point = _p;
+								normal = _n;
 								min_dist = dist_sq;
 							}
 						}
 					}
 
+					bool in_shadow = false;
+					if (object)
+					{
+						const Ray shadow_ray {.orig = point, .dir = glm::normalize(light.pos - point)};
+
+						for (auto [type, obj] : scene)
+						{
+							if (obj != object and glm::dot(shadow_ray.dir, normal) > 0)
+							if (hit(shadow_ray, type, obj, _p, _n)) {
+								in_shadow = true;
+								break;
+							}
+						}
+					}
+
 					glm::vec3* pixel = reinterpret_cast<glm::vec3*>(image.data() + location * 3);
-					// if (object) *pixel = glm::clamp(normal, glm::vec3(0), glm::vec3(1));
-					if (object) *pixel = normal * 0.5f + 0.5f;
-					else *pixel = glm::vec3(0, 0, 0);
+					if (object)
+					{
+						*pixel = object->color * light.color;
+						if (in_shadow)
+							*pixel *= 0.5f;
+					}
+					else
+						*pixel = glm::vec3(0, 0, 0);
 				}
 			}
 
-			// std::this_thread::sleep_for(std::chrono::milliseconds(25));
+			auto tp_end = std::chrono::high_resolution_clock::now();
+			title = std::format("Sap: {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(tp_end - tp_begin).count());
 		}
 	}
 
