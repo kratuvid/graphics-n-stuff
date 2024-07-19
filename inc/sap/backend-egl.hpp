@@ -4,6 +4,8 @@
 #include "backend.hpp"
 #include "utility.hpp"
 
+extern const std::array<std::unordered_map<GLenum, std::string_view>, 3> readables;
+
 class BackendEGL : public Backend
 {
 private:
@@ -90,7 +92,6 @@ public:
 			EGL_NONE
 		};
 		iassert(context = eglCreateContext(display, config, EGL_NO_CONTEXT, context_attribs));
-
 		iassert(eglMakeCurrent(display, surface, surface, context));
 
 		iassert(gladLoadGLLoader((GLADloadproc)eglGetProcAddress) != 0);
@@ -98,6 +99,7 @@ public:
 		glEnable(GL_DEPTH_TEST);
 
 		glDebugMessageCallback(debug_callback, nullptr);
+		glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
 	}
 
 	void on_configure(bool new_dimensions, wl_array* states) override
@@ -122,6 +124,37 @@ private:
 
 	static void debug_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* message, const void* data)
 	{
-		std::println(stderr, "GL Debug: source: {:#x}, type: {:#x}, id: {:#x}, severity: {:#x}: {}", source, type, id, severity, message);
+		std::println(stderr, "\x1b[1;31m[GL: {}, {}, {}, {}]:\x1b[0m {}",
+			readables[0].at(severity), readables[1].at(source), readables[2].at(type),
+			id, message
+		);
 	}
 };
+
+const std::array<std::unordered_map<GLenum, std::string_view>, 3> readables {{
+	{ // severity
+		{GL_DEBUG_SEVERITY_HIGH, "high"},
+		{GL_DEBUG_SEVERITY_MEDIUM, "medium"},
+		{GL_DEBUG_SEVERITY_LOW, "low"},
+		{GL_DEBUG_SEVERITY_NOTIFICATION, "notification"},
+	},
+	{ // source
+		{GL_DEBUG_SOURCE_API, "API"},
+		{GL_DEBUG_SOURCE_WINDOW_SYSTEM, "window system"},
+		{GL_DEBUG_SOURCE_SHADER_COMPILER, "shader compiler"},
+		{GL_DEBUG_SOURCE_THIRD_PARTY, "third party"},
+		{GL_DEBUG_SOURCE_APPLICATION, "application"},
+		{GL_DEBUG_SOURCE_OTHER, "other"},
+	},
+	{ // type
+		{GL_DEBUG_TYPE_ERROR, "error"},
+		{GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR, "deprecated behaviour"},
+		{GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR, "undefined behaviour"},
+		{GL_DEBUG_TYPE_PORTABILITY, "portability"},
+		{GL_DEBUG_TYPE_PERFORMANCE, "performance"},
+		{GL_DEBUG_TYPE_MARKER, "marker"},
+		{GL_DEBUG_TYPE_PUSH_GROUP, "push group"},
+		{GL_DEBUG_TYPE_POP_GROUP, "pop group"},
+		{GL_DEBUG_TYPE_OTHER, "other"},
+	}
+}};

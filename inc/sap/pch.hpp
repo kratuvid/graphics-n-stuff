@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <type_traits>
 #include <thread>
+#include <typeindex>
 
 #include <fcntl.h>
 #include <linux/input-event-codes.h>
