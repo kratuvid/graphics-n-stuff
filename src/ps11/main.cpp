@@ -7,6 +7,7 @@ class PS11 : public App<BackendSHM>
 public:
 	PS11()
 	{
+		title = "PS11";
 	}
 
 private:
@@ -20,6 +21,8 @@ private:
 
 	void draw(float delta_time) override
 	{
+		auto buf = backend->next_buffer();
+		backend->present(buf);
 	}
 
 private:
