@@ -1,5 +1,4 @@
 #include "app.hpp"
-#include "backend-shm.hpp"
 #include "backend-egl.hpp"
 
 class Sap : public App<BackendEGL>
@@ -260,7 +259,7 @@ private:
 		spheres[2].pos.z = glm::sin(elapsed_time);
 		*/
 
-		// light.pos.x = glm::cos(elapsed_time) * 10.f;
+		light.pos.x = glm::cos(elapsed_time) * 10.f;
 		// light.pos.z = glm::sin(elapsed_time) * 10.f;
 		light.pos.z = 5.f;
 		// light.pos.y = 10.f + glm::sin(elapsed_time) * 5.f;

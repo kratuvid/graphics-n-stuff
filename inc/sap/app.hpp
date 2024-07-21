@@ -310,6 +310,14 @@ public: // listeners
 			new_dimensions = true;
         }
 
+		if (new_dimensions) {
+			wl_region* region;
+			iassert(region = wl_compositor_create_region(app->wl.global.compositor));
+			wl_region_add(region, 0, 0, width, height);
+			wl_surface_set_opaque_region(app->wl.window.surface, region);
+			wl_region_destroy(region);
+		}
+
 		app->backend->on_configure(new_dimensions, states);
 		app->on_configure(new_dimensions, states);
     }
