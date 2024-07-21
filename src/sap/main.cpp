@@ -1,5 +1,6 @@
 #include "app.hpp"
 #include "backend-egl.hpp"
+#include "pch.hpp"
 
 class Sap : public App<BackendEGL>
 {
@@ -239,31 +240,6 @@ private:
 
 	void update(float delta_time) override
 	{
-		// cam_pos = {4 + glm::abs(glm::sin(elapsed_time)) * 4, 1, -1};
-		cam_dir = glm::normalize(glm::vec3(0, 0, 0) - cam_pos);
-		auto t = glm::normalize(glm::cross(cam_dir, glm::vec3(0, 1, 0)));
-		cam_up = glm::normalize(glm::cross(cam_dir, t));
-		cam_right = glm::normalize(glm::cross(cam_dir, cam_up));
-
-		vp_pos = cam_pos + focal_length * cam_dir;
-		// vp_size = glm::vec2(2 * aspect_ratio, 2);
-		vp_size.y = 2 * focal_length * glm::tan(fov / 2);
-		vp_size.x = vp_size.y * aspect_ratio;
-		vp_topleft = vp_pos + (-cam_right * vp_size.x * 0.5f + cam_up * vp_size.y * 0.5f);
-		vp_delta = vp_size / glm::vec2(iwidth, iheight);
-
-		spheres[0]->pos.x = glm::cos(elapsed_time) * 2.f;
-		spheres[0]->pos.z = glm::sin(elapsed_time) * 3.f;
-		/*
-		spheres[1].pos.y = glm::sin(elapsed_time);
-		spheres[2].pos.z = glm::sin(elapsed_time);
-		*/
-
-		light.pos.x = glm::cos(elapsed_time) * 10.f;
-		// light.pos.z = glm::sin(elapsed_time) * 10.f;
-		light.pos.z = 5.f;
-		// light.pos.y = 10.f + glm::sin(elapsed_time) * 5.f;
-		
 		const float factor = delta_time * 2;
 		if (input.keyboard.map_utf['1']) cam_pos.x -= factor;
 		if (input.keyboard.map_utf['2']) cam_pos.x += factor;
@@ -287,6 +263,31 @@ private:
 		if (input.keyboard.map[XKB_KEY_Right]) cam_pos += cam_right * factor;
 		if (input.keyboard.map_utf['-']) cam_pos += cam_up * factor;
 		if (input.keyboard.map_utf['=']) cam_pos -= cam_up * factor;
+
+		// cam_pos = {4 + glm::abs(glm::sin(elapsed_time)) * 4, 1, -1};
+		cam_dir = glm::normalize(glm::vec3(0, 0, 0) - cam_pos);
+		auto t = glm::normalize(glm::cross(cam_dir, glm::vec3(0, 1, 0)));
+		cam_up = glm::normalize(glm::cross(cam_dir, t));
+		cam_right = glm::normalize(glm::cross(cam_dir, cam_up));
+
+		vp_pos = cam_pos + focal_length * cam_dir;
+		// vp_size = glm::vec2(2 * aspect_ratio, 2);
+		vp_size.y = 2 * focal_length * glm::tan(fov / 2);
+		vp_size.x = vp_size.y * aspect_ratio;
+		vp_topleft = vp_pos + (-cam_right * vp_size.x * 0.5f + cam_up * vp_size.y * 0.5f);
+		vp_delta = vp_size / glm::vec2(iwidth, iheight);
+
+		spheres[0]->pos.x = glm::cos(elapsed_time * 0.5f) * 2.f;
+		spheres[0]->pos.z = glm::sin(elapsed_time * 0.5f) * 3.f;
+		/*
+		spheres[1].pos.y = glm::sin(elapsed_time);
+		spheres[2].pos.z = glm::sin(elapsed_time);
+		*/
+
+		light.pos.x = glm::cos(elapsed_time) * 10.f;
+		// light.pos.z = glm::sin(elapsed_time) * 10.f;
+		light.pos.z = 5.f;
+		// light.pos.y = 10.f + glm::sin(elapsed_time) * 5.f;
 	}
 	
 	void render(std::stop_token stoken, int start_row, int end_row)
@@ -309,7 +310,7 @@ private:
 					}
 
 					const Shape* object = nullptr;
-					glm::vec3 point, normal, _p, _n;
+					glm::vec3 point, normal, _p = cam_pos, _n, color = glm::vec3(1);
 
 					auto min_dist = std::numeric_limits<float>::max();
 
@@ -321,10 +322,50 @@ private:
 								object = obj;
 								point = _p;
 								normal = _n;
+								color = obj->color;
 								min_dist = dist_sq;
 							}
 						}
 					}
+
+					/*
+					glm::vec3 last_p = cam_pos;
+
+					const int bounce = 1;
+					for (int i : std::views::iota(0, bounce))
+					{
+						const Shape* object2 = nullptr;
+						glm::vec3 _p2, _n2;
+						
+						auto min_dist = std::numeric_limits<float>::max();
+						for (auto [type, obj] : scene)
+						{
+							if (hit(ray, type, obj, _p, _n)) {
+								const float dist_sq = glm::distance2(cam_pos, _p);
+								if (dist_sq < min_dist) {
+									last_pos = _p2;
+									_p2 = _p;
+									_n2 = _n;
+
+									if (i == 0) {
+										point = _p;
+										normal = _n;
+										object = obj;
+									}
+
+									object2 = obj;
+									min_dist = dist_sq;
+								}
+							}
+						}
+						
+						if (object2 == nullptr) break;
+						else {
+							ray.orig = point;
+							ray.dir = glm::normalize(_p2 - last_p);
+						}
+					}
+					*/
 
 					bool in_shadow = false;
 					if (object)

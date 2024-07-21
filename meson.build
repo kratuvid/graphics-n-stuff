@@ -60,3 +60,4 @@ executable('fractal', 'src/fractal/main.cpp', include_directories: incs['primary
 executable('fractal-mp', 'src/fractal-mp/main.cpp', include_directories: incs['primary'], dependencies: deps_shm + deps['mpfr'] + deps['mpc'], cpp_pch: 'inc/fractal-mp/pch.hpp')
 
 executable('sap', 'src/sap/main.cpp', include_directories: [incs['primary']] + [include_directories('inc/sap')], dependencies: deps_egl, cpp_pch: 'inc/sap/pch.hpp')
+executable('ps11', 'src/ps11/main.cpp', include_directories: [incs['primary']] + [include_directories('inc/ps11')], dependencies: deps_shm, cpp_pch: 'inc/ps11/pch.hpp')
