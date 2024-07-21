@@ -273,12 +273,20 @@ private:
 		if (input.keyboard.map_utf['6']) cam_pos.z += factor;
 		if (input.keyboard.map_utf['7']) fov -= factor;
 		if (input.keyboard.map_utf['8']) fov += factor;
+
 		if (input.keyboard.map_utf['w']) cam_pos += cam_dir * factor;
 		if (input.keyboard.map_utf['s']) cam_pos -= cam_dir * factor;
 		if (input.keyboard.map_utf['a']) cam_pos -= cam_right * factor;
 		if (input.keyboard.map_utf['d']) cam_pos += cam_right * factor;
 		if (input.keyboard.map_utf['q']) cam_pos += cam_up * factor;
 		if (input.keyboard.map_utf['e']) cam_pos -= cam_up * factor;
+
+		if (input.keyboard.map[XKB_KEY_Up]) cam_pos += cam_dir * factor;
+		if (input.keyboard.map[XKB_KEY_Down]) cam_pos -= cam_dir * factor;
+		if (input.keyboard.map[XKB_KEY_Left]) cam_pos -= cam_right * factor;
+		if (input.keyboard.map[XKB_KEY_Right]) cam_pos += cam_right * factor;
+		if (input.keyboard.map_utf['-']) cam_pos += cam_up * factor;
+		if (input.keyboard.map_utf['=']) cam_pos -= cam_up * factor;
 	}
 	
 	void render(std::stop_token stoken, int start_row, int end_row)
