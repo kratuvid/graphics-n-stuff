@@ -10,6 +10,8 @@
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
+#include <fstream>
+#include <algorithm>
 
 #include <fcntl.h>
 #include <linux/input-event-codes.h>

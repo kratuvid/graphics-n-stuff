@@ -1,4 +1,5 @@
-#include "part-rasterization.hpp"
+#include "utility.hpp"
+#include "part-sap.hpp"
 
 int main(int argc, char** argv)
 {
@@ -7,7 +8,7 @@ int main(int argc, char** argv)
     spdlog::set_level(spdlog::level::debug);
     spdlog::set_pattern("[%^%l%$ +%o] %v");
 
-    PS11 app;
+    PS11 app(argc, argv);
     try {
         app.init();
         app.run();
