@@ -27,6 +27,14 @@ private:
 		tsx,
 		txa, txs,
 		tya,
+
+		/* Stack */
+		pha, php,
+		pla, plp,
+
+		/* Load/Store */
+		lda, ldx, ldy,
+		sta, stx, sty,
 	};
 
 	enum class Addressing {
@@ -93,6 +101,45 @@ private:
 		{0x8a, {Opname::txa, Addressing::none, 2}},
 		{0x9a, {Opname::txs, Addressing::none, 2}},
 		{0x98, {Opname::tya, Addressing::none, 2}},
+
+		/* Stack */
+		{0x48, {Opname::pha, Addressing::none, 3}},
+		{0x08, {Opname::php, Addressing::none, 3}},
+		{0x68, {Opname::pla, Addressing::none, 4}},
+		{0x28, {Opname::plp, Addressing::none, 4}},
+
+		/* Load/Store */
+		{0xa9, {Opname::lda, Addressing::immediate, 2}},
+		{0xad, {Opname::lda, Addressing::absolute, 4}},
+		{0xbd, {Opname::lda, Addressing::x_indexed_absolute, 4}},
+		{0xb9, {Opname::lda, Addressing::y_indexed_absolute, 4}},
+		{0xa5, {Opname::lda, Addressing::zero_page, 3}},
+		{0xb5, {Opname::lda, Addressing::x_indexed_zero_page, 4}},
+		{0xa1, {Opname::lda, Addressing::x_indexed_zero_page_indirect, 6}},
+		{0xb1, {Opname::lda, Addressing::zero_page_indirect_y_indexed, 5}},
+		{0xa2, {Opname::ldx, Addressing::immediate, 2}},
+		{0xae, {Opname::ldx, Addressing::absolute, 4}},
+		{0xbe, {Opname::ldx, Addressing::y_indexed_absolute, 4}},
+		{0xa6, {Opname::ldx, Addressing::zero_page, 3}},
+		{0xb6, {Opname::ldx, Addressing::y_indexed_zero_page, 4}},
+		{0xa0, {Opname::ldy, Addressing::immediate, 2}},
+		{0xac, {Opname::ldy, Addressing::absolute, 4}},
+		{0xbc, {Opname::ldy, Addressing::x_indexed_absolute, 4}},
+		{0xa4, {Opname::ldy, Addressing::zero_page, 3}},
+		{0xb4, {Opname::ldy, Addressing::x_indexed_zero_page, 4}},
+		{0x8d, {Opname::sta, Addressing::absolute, 4}},
+		{0x9d, {Opname::sta, Addressing::x_indexed_absolute, 5}},
+		{0x99, {Opname::sta, Addressing::y_indexed_absolute, 5}},
+		{0x85, {Opname::sta, Addressing::zero_page, 3}},
+		{0x95, {Opname::sta, Addressing::x_indexed_zero_page, 4}},
+		{0x81, {Opname::sta, Addressing::x_indexed_zero_page_indirect, 6}},
+		{0x91, {Opname::sta, Addressing::zero_page_indirect_y_indexed, 6}},
+		{0x8e, {Opname::stx, Addressing::absolute, 4}},
+		{0x86, {Opname::stx, Addressing::zero_page, 3}},
+		{0x96, {Opname::stx, Addressing::y_indexed_zero_page, 4}},
+		{0x8c, {Opname::stx, Addressing::absolute, 4}},
+		{0x84, {Opname::stx, Addressing::zero_page, 3}},
+		{0x94, {Opname::stx, Addressing::x_indexed_zero_page, 4}},
 	};
 
 private:
@@ -135,7 +182,7 @@ private:
 		file.seekg(0, std::ios::end);
 		const size_t filesize = file.tellg();
 		file.seekg(0);
-		// file.read(reinterpret_cast<char*>(ROM.data()), std::min(size_t(16), filesize));
+		file.read(reinterpret_cast<char*>(ROM.data()), std::min(ROM.size(), filesize));
 
 		return true;
 	}
@@ -143,15 +190,17 @@ private:
 private:
 	void begin()
 	{
-		A = X = Y = S = P = 0;
+		A = X = Y = P = 0;
+		S = 0xff;
 		PC = 0;
 		std::fill(RAM.begin(), RAM.end(), 0);
 		std::fill(ROM.begin(), ROM.end(), 0);
 	}
 
-	uint16_t fetch_operand(Addressing addr)
+	uint16_t fetch_operand(Addressing addr, bool& page_cross)
 	{
 		uint16_t operand = 0;
+		page_cross = false;
 
 		auto _fetch_word = [&]() -> uint16_t {
 			uint16_t value = fetch();
@@ -159,6 +208,7 @@ private:
 			return value;
 		};
 
+		uint16_t temp[2];
 		switch (addr)
 		{
 			using enum Addressing;
@@ -176,12 +226,18 @@ private:
 
 		case x_indexed_absolute:
 			operand = _fetch_word();
+			temp[0] = operand & 0xff'00;
 			operand += X;
+			temp[1] = operand & 0xff'00;
+			page_cross = temp[0] != temp[1];
 			break;
 
 		case y_indexed_absolute:
 			operand = _fetch_word();
+			temp[0] = operand & 0xff'00;
 			operand += Y;
+			temp[1] = operand & 0xff'00;
+			page_cross = temp[0] != temp[1];
 			break;
 
 		case absolute_indirect:
@@ -215,11 +271,19 @@ private:
 		case zero_page_indirect_y_indexed:
 			operand = fetch();
 			operand = RAM[operand] | uint16_t(RAM[operand+1]);
+			temp[0] = operand & 0xff'00;
 			operand += Y;
+			temp[1] = operand & 0xff'00;
+			page_cross = temp[0] != temp[1];
 			break;
 
 		case relative:
-			operand = fetch();
+			// NOTE: Probably not properly implemented
+			operand = int16_t(fetch());
+			{
+				temp[0] = PC + operand;
+				page_cross = (PC & 0xff'00) != (temp[0] & 0xff'00);
+			}
 			break;
 		}
 
@@ -231,23 +295,35 @@ private:
 		auto search = opcode_table.find(opcode);
 		iassert(search != opcode_table.end(), "Unimplemented instruction {:#x} at PC {:#x}", opcode, PC-1);
 		const auto [opname, addr, ideal_cycles] = search->second;
-		const uint16_t operand = fetch_operand(addr);
+
+		bool page_cross;
+		const uint16_t operand = fetch_operand(addr, page_cross);
 
 		uint8_t cycles = ideal_cycles;
 
 		auto _branch_considered = [&](uint16_t operand) {
-			cycles += 1 + ((PC & 0xff00) == (operand & 0xff00) ? 0 : 1);
-			PC += int16_t(operand);
+			PC += operand;
+			cycles += 1 + uint8_t(page_cross);
 		};
 
 		enum _Flags : unsigned {
 			_F_N = 1, _F_Z = 2
 		};
-		auto _update_flags = [&](unsigned flags, auto value) {
+		auto _update_flags = [&](unsigned flags, uint8_t value) {
 			if (flags & _F_N)
-				NF = value < 0;
+				NF = value & (1 << 7);
 			if (flags & _F_Z)
 				ZF = value == 0;
+		};
+
+		auto _push = [&](uint8_t value) {
+			// iassert(S != 0, "Stacking overflow at PC {:#x}", PC);
+			RAM[0x0100 + S] = value;
+			S--;
+		};
+		auto _pop = [&]() -> uint8_t {
+			S++;
+			return RAM[0x0100 + S];
 		};
 
 		switch (opname)
@@ -291,6 +367,32 @@ private:
 		case txa: A = X; _update_flags(_F_N | _F_Z, A); break;
 		case txs: S = X; break;
 		case tya: A = Y; _update_flags(_F_N | _F_Z, A); break;
+
+		/* Stack */
+		case pha: _push(A); break;
+		case php: _push(P); break;
+		case pla: A = _pop(); _update_flags(_F_N | _F_Z, A); break;
+		case plp: P = _pop(); break;
+
+		/* Load/Store */
+		case lda:
+			A = addr == Addressing::immediate ? operand : RAM[operand];
+			_update_flags(_F_N | _F_Z, A);
+			cycles += uint8_t(page_cross);
+			break;
+		case ldx:
+			X = addr == Addressing::immediate ? operand : RAM[operand];
+			_update_flags(_F_N | _F_Z, X);
+			cycles += uint8_t(page_cross);
+			break;
+		case ldy:
+			Y = addr == Addressing::immediate ? operand : RAM[operand];
+			_update_flags(_F_N | _F_Z, Y);
+			cycles += uint8_t(page_cross);
+			break;
+		case sta: RAM[operand] = A; break;
+		case stx: RAM[operand] = X; break;
+		case sty: RAM[operand] = X; break;
 		}
 
 		return cycles;
@@ -301,7 +403,6 @@ private:
 		return ROM[PC++];
 	}
 
-	// returns: extra cycles consumed from the 2 base cycles
 	uint8_t step()
 	{
 		uint8_t opcode = fetch();
