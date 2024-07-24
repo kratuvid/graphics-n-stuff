@@ -63,7 +63,7 @@ private:
 		PC %= 16;
 
 		auto _log = [&](std::string_view name) {
-			std::println("{} {}", name, id);
+			std::println(stderr, "{} {:#x},{}", name, id, id);
 		};
 
 		switch (opcode)
@@ -132,7 +132,7 @@ public:
 	{
 		if (argc > 1) {
 			if (!load(argv[1]))
-				std::println("Couldn't load {}", argv[1]);
+				std::println(stderr, "Couldn't load {}", argv[1]);
 		}
 	}
 
@@ -143,25 +143,25 @@ public:
 	void run()
 	{
 		auto _print_regs_flags = [&]() {
-			std::println("Registers: PC = {}, A = {:#x},{},{}, OUT = {:#x},{},{}", PC, A, A, (int8_t)A, OUT, OUT, (int8_t)OUT);
-			std::println("Flags: ZF = {}, CF = {}", ZF, CF);
-			std::print("RAM:");
+			std::println(stderr, "Registers: PC = {}, A = {:#x},{},{}, OUT = {:#x},{},{}", PC, A, A, (int8_t)A, OUT, OUT, (int8_t)OUT);
+			std::println(stderr, "Flags: ZF = {}, CF = {}", ZF, CF);
+			std::print(stderr, "RAM:");
 			for (unsigned i=0; i < 4; i++)
 			{
-				std::print("\n{:0>4x}: ", i*4);
+				std::print(stderr, "\n{:0>2x}: ", i*4);
 				for (unsigned j=0; j < 4; j++)
-					std::print("0x{:0>4x} ", RAM[i*4 + j]);
+					std::print(stderr, "0x{:0>2x} ", RAM[i*4 + j]);
 			}
 			std::println();
 		};
 
 		auto _load_new = [&]() {
 			std::string filename;
-			std::print("Dump to load? ");
+			std::print(stderr, "Dump to load? ");
 
 			if (!std::getline(std::cin, filename) or filename.size() < 0) return;
 			if (!load(filename))
-				std::println("Couldn't load {}", filename);
+				std::println(stderr, "Couldn't load {}", filename);
 
 			std::cin.clear();
 		};
@@ -177,6 +177,9 @@ public:
 			std::cin.clear();
 			return true;
 		};
+
+		unsigned speed = 5;  // Hertz
+		std::chrono::nanoseconds sleep_for (uint64_t(1e9 / double(speed)));
 
 		bool quit = false;
 		while (!quit)
@@ -198,7 +201,7 @@ public:
 					break;
 				}
 			}
-			else
+			else if (false)
 			{
 				_print_regs_flags();
 
@@ -220,6 +223,16 @@ public:
 					quit = true;
 					break;
 				}
+			}
+			else
+			{
+				auto then = std::chrono::high_resolution_clock::now();
+				std::println();
+				advance();
+				_print_regs_flags();
+				auto now = std::chrono::high_resolution_clock::now();
+
+				std::this_thread::sleep_for(sleep_for - (now - then));
 			}
 		}
 	}
