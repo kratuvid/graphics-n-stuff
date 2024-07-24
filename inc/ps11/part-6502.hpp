@@ -35,6 +35,10 @@ private:
 		/* Load/Store */
 		lda, ldx, ldy,
 		sta, stx, sty,
+
+		/* Shift */
+		asl, lsr,
+		rol, ror,
 	};
 
 	enum class Addressing {
@@ -137,9 +141,31 @@ private:
 		{0x8e, {Opname::stx, Addressing::absolute, 4}},
 		{0x86, {Opname::stx, Addressing::zero_page, 3}},
 		{0x96, {Opname::stx, Addressing::y_indexed_zero_page, 4}},
-		{0x8c, {Opname::stx, Addressing::absolute, 4}},
-		{0x84, {Opname::stx, Addressing::zero_page, 3}},
-		{0x94, {Opname::stx, Addressing::x_indexed_zero_page, 4}},
+		{0x8c, {Opname::sty, Addressing::absolute, 4}},
+		{0x84, {Opname::sty, Addressing::zero_page, 3}},
+		{0x94, {Opname::sty, Addressing::x_indexed_zero_page, 4}},
+
+		/* Shift */
+		{0x0a, {Opname::asl, Addressing::none, 2}},
+		{0x0e, {Opname::asl, Addressing::absolute, 6}},
+		{0x1e, {Opname::asl, Addressing::x_indexed_absolute, 7}},
+		{0x06, {Opname::asl, Addressing::zero_page, 5}},
+		{0x16, {Opname::asl, Addressing::x_indexed_zero_page, 6}},
+		{0x4a, {Opname::lsr, Addressing::none, 2}},
+		{0x4e, {Opname::lsr, Addressing::absolute, 6}},
+		{0x5e, {Opname::lsr, Addressing::x_indexed_absolute, 7}},
+		{0x46, {Opname::lsr, Addressing::zero_page, 5}},
+		{0x56, {Opname::lsr, Addressing::x_indexed_zero_page, 6}},
+		{0x2a, {Opname::rol, Addressing::none, 2}},
+		{0x2e, {Opname::rol, Addressing::absolute, 6}},
+		{0x3e, {Opname::rol, Addressing::x_indexed_absolute, 7}},
+		{0x26, {Opname::rol, Addressing::zero_page, 5}},
+		{0x36, {Opname::rol, Addressing::x_indexed_zero_page, 6}},
+		{0x6a, {Opname::ror, Addressing::none, 2}},
+		{0x6e, {Opname::ror, Addressing::absolute, 6}},
+		{0x7e, {Opname::ror, Addressing::x_indexed_absolute, 7}},
+		{0x66, {Opname::ror, Addressing::zero_page, 5}},
+		{0x76, {Opname::ror, Addressing::x_indexed_zero_page, 6}},
 	};
 
 private:
@@ -326,6 +352,7 @@ private:
 			return RAM[0x0100 + S];
 		};
 
+		uint8_t *ptemp;
 		switch (opname)
 		{
 			using enum Opname;
@@ -392,7 +419,24 @@ private:
 			break;
 		case sta: RAM[operand] = A; break;
 		case stx: RAM[operand] = X; break;
-		case sty: RAM[operand] = X; break;
+		case sty: RAM[operand] = Y; break;
+
+		case asl:
+		case rol:
+			ptemp = addr == Addressing::none ? &A : &RAM[operand];
+			CF = *ptemp & (1 << 7);
+			*ptemp <<= 1;
+			if (opname == rol) *ptemp |= uint8_t(CF);
+			_update_flags(_F_N | _F_Z, *ptemp);
+			break;
+		case lsr:
+		case ror:
+			ptemp = addr == Addressing::none ? &A : &RAM[operand];
+			CF = *ptemp & 1;
+			*ptemp >>= 1;
+			if (opname == ror) *ptemp |= uint8_t(CF) << 7;
+			_update_flags(_F_N | _F_Z, *ptemp);
+			break;
 		}
 
 		return cycles;
