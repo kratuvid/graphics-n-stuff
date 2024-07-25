@@ -1,0 +1,7 @@
+init:
+	lda #$01
+
+loop:
+	clc
+	adc #$8f
+	jmp loop

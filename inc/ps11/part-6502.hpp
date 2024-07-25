@@ -6,6 +6,54 @@
 class PS11
 {
 private:
+	inline static const std::string_view opname_str[] {
+		/* NOP */
+		"NOP",
+
+		/* FLAGS */
+		"CLC", "CLD", "CLI", "CLV",
+		"SEC", "SED", "SEI",
+
+		/* CONTROL FLOW: BRANCH */
+		"BCC", "BNE", "BPL", "BVC",
+		"BCS", "BEQ", "BMI", "BVS",
+
+		/* ARITHMETIC: INC/DEC */
+		"DEC", "DEX", "DEY",
+		"INC", "INX", "INY",
+
+		/* TRANSFER */
+		"TAX", "TAY", 
+		"TSX",
+		"TXA", "TXS",
+		"TYA",
+
+		/* STACK */
+		"PHA", "PHP",
+		"PLA", "PLP",
+
+		/* LOAD/STORE */
+		"LDA", "LDX", "LDY",
+		"STA", "STX", "STY",
+
+		/* SHIFT */
+		"ASL", "LSR",
+		"ROL", "ROR",
+
+		/* LOGIC */
+		"AND", "BIT",
+		"EOR", "ORA",
+
+		/* ARITHMETIC */
+		"ADC", "SBC",
+		"CMP", "CPX", "CPY",
+
+		/* CONTROL FLOW */
+		"BRK",
+		"JMP", "JSR",
+		"RTI", "RTS",
+	};
+
 	enum class Opname {
 		/* NOP */
 		nop,
@@ -39,6 +87,19 @@ private:
 		/* Shift */
 		asl, lsr,
 		rol, ror,
+
+		/* Logic */
+		andd, bit,
+		eor, ora,
+
+		/* Arithmetic */
+		adc, sbc,
+		cmp, cpx, cpy,
+
+		/* Control Flow */
+		brk,
+		jmp, jsr,
+		rti, rts,
 	};
 
 	enum class Addressing {
@@ -85,17 +146,23 @@ private:
 		{0x70, {Opname::bvs, Addressing::relative, 2}},
 
 		/* Arithmetic: Inc/Dec */
+		// dec
 		{0xce, {Opname::dec, Addressing::absolute, 6}},
 		{0xde, {Opname::dec, Addressing::x_indexed_absolute, 7}},
 		{0xc6, {Opname::dec, Addressing::zero_page, 5}},
 		{0xd6, {Opname::dec, Addressing::x_indexed_zero_page, 6}},
+		// dex
 		{0xca, {Opname::dex, Addressing::none, 2}},
+		// dey
 		{0x88, {Opname::dey, Addressing::none, 2}},
+		// inc
 		{0xee, {Opname::inc, Addressing::absolute, 6}},
 		{0xfe, {Opname::inc, Addressing::x_indexed_absolute, 7}},
 		{0xe6, {Opname::inc, Addressing::zero_page, 5}},
 		{0xf6, {Opname::inc, Addressing::x_indexed_zero_page, 6}},
+		// inx
 		{0xe8, {Opname::inx, Addressing::none, 2}},
+		// iny
 		{0xc8, {Opname::iny, Addressing::none, 2}},
 
 		/* Transfer */
@@ -113,6 +180,7 @@ private:
 		{0x28, {Opname::plp, Addressing::none, 4}},
 
 		/* Load/Store */
+		// lda
 		{0xa9, {Opname::lda, Addressing::immediate, 2}},
 		{0xad, {Opname::lda, Addressing::absolute, 4}},
 		{0xbd, {Opname::lda, Addressing::x_indexed_absolute, 4}},
@@ -121,16 +189,19 @@ private:
 		{0xb5, {Opname::lda, Addressing::x_indexed_zero_page, 4}},
 		{0xa1, {Opname::lda, Addressing::x_indexed_zero_page_indirect, 6}},
 		{0xb1, {Opname::lda, Addressing::zero_page_indirect_y_indexed, 5}},
+		// ldx
 		{0xa2, {Opname::ldx, Addressing::immediate, 2}},
 		{0xae, {Opname::ldx, Addressing::absolute, 4}},
 		{0xbe, {Opname::ldx, Addressing::y_indexed_absolute, 4}},
 		{0xa6, {Opname::ldx, Addressing::zero_page, 3}},
 		{0xb6, {Opname::ldx, Addressing::y_indexed_zero_page, 4}},
+		// ldy
 		{0xa0, {Opname::ldy, Addressing::immediate, 2}},
 		{0xac, {Opname::ldy, Addressing::absolute, 4}},
 		{0xbc, {Opname::ldy, Addressing::x_indexed_absolute, 4}},
 		{0xa4, {Opname::ldy, Addressing::zero_page, 3}},
 		{0xb4, {Opname::ldy, Addressing::x_indexed_zero_page, 4}},
+		// sta
 		{0x8d, {Opname::sta, Addressing::absolute, 4}},
 		{0x9d, {Opname::sta, Addressing::x_indexed_absolute, 5}},
 		{0x99, {Opname::sta, Addressing::y_indexed_absolute, 5}},
@@ -138,34 +209,114 @@ private:
 		{0x95, {Opname::sta, Addressing::x_indexed_zero_page, 4}},
 		{0x81, {Opname::sta, Addressing::x_indexed_zero_page_indirect, 6}},
 		{0x91, {Opname::sta, Addressing::zero_page_indirect_y_indexed, 6}},
+		// stx
 		{0x8e, {Opname::stx, Addressing::absolute, 4}},
 		{0x86, {Opname::stx, Addressing::zero_page, 3}},
 		{0x96, {Opname::stx, Addressing::y_indexed_zero_page, 4}},
+		// sty
 		{0x8c, {Opname::sty, Addressing::absolute, 4}},
 		{0x84, {Opname::sty, Addressing::zero_page, 3}},
 		{0x94, {Opname::sty, Addressing::x_indexed_zero_page, 4}},
 
 		/* Shift */
+		// asl
 		{0x0a, {Opname::asl, Addressing::none, 2}},
 		{0x0e, {Opname::asl, Addressing::absolute, 6}},
 		{0x1e, {Opname::asl, Addressing::x_indexed_absolute, 7}},
 		{0x06, {Opname::asl, Addressing::zero_page, 5}},
 		{0x16, {Opname::asl, Addressing::x_indexed_zero_page, 6}},
+		// lsr
 		{0x4a, {Opname::lsr, Addressing::none, 2}},
 		{0x4e, {Opname::lsr, Addressing::absolute, 6}},
 		{0x5e, {Opname::lsr, Addressing::x_indexed_absolute, 7}},
 		{0x46, {Opname::lsr, Addressing::zero_page, 5}},
 		{0x56, {Opname::lsr, Addressing::x_indexed_zero_page, 6}},
+		// rol
 		{0x2a, {Opname::rol, Addressing::none, 2}},
 		{0x2e, {Opname::rol, Addressing::absolute, 6}},
 		{0x3e, {Opname::rol, Addressing::x_indexed_absolute, 7}},
 		{0x26, {Opname::rol, Addressing::zero_page, 5}},
 		{0x36, {Opname::rol, Addressing::x_indexed_zero_page, 6}},
+		// ror
 		{0x6a, {Opname::ror, Addressing::none, 2}},
 		{0x6e, {Opname::ror, Addressing::absolute, 6}},
 		{0x7e, {Opname::ror, Addressing::x_indexed_absolute, 7}},
 		{0x66, {Opname::ror, Addressing::zero_page, 5}},
 		{0x76, {Opname::ror, Addressing::x_indexed_zero_page, 6}},
+
+		/* Logic */
+		// and
+		{0x29, {Opname::andd, Addressing::immediate, 2}},
+		{0x2d, {Opname::andd, Addressing::absolute, 4}},
+		{0x3d, {Opname::andd, Addressing::x_indexed_absolute, 4}},
+		{0x39, {Opname::andd, Addressing::y_indexed_absolute, 4}},
+		{0x25, {Opname::andd, Addressing::zero_page, 3}},
+		{0x35, {Opname::andd, Addressing::x_indexed_zero_page, 4}},
+		{0x21, {Opname::andd, Addressing::x_indexed_zero_page_indirect, 6}},
+		{0x31, {Opname::andd, Addressing::zero_page_indirect_y_indexed, 5}},
+		// bit
+		{0x2c, {Opname::bit, Addressing::absolute, 4}},
+		{0x24, {Opname::bit, Addressing::zero_page, 3}},
+		// eor
+		{0x49, {Opname::eor, Addressing::immediate, 2}},
+		{0x4d, {Opname::eor, Addressing::absolute, 4}},
+		{0x5d, {Opname::eor, Addressing::x_indexed_absolute, 4}},
+		{0x59, {Opname::eor, Addressing::y_indexed_absolute, 4}},
+		{0x45, {Opname::eor, Addressing::zero_page, 3}},
+		{0x55, {Opname::eor, Addressing::x_indexed_zero_page, 4}},
+		{0x41, {Opname::eor, Addressing::x_indexed_zero_page_indirect, 6}},
+		{0x51, {Opname::eor, Addressing::zero_page_indirect_y_indexed, 5}},
+		// ora
+		{0x09, {Opname::ora, Addressing::immediate, 2}},
+		{0x0d, {Opname::ora, Addressing::absolute, 4}},
+		{0x1d, {Opname::ora, Addressing::x_indexed_absolute, 4}},
+		{0x19, {Opname::ora, Addressing::y_indexed_absolute, 4}},
+		{0x05, {Opname::ora, Addressing::zero_page, 3}},
+		{0x15, {Opname::ora, Addressing::x_indexed_zero_page, 4}},
+		{0x01, {Opname::ora, Addressing::x_indexed_zero_page_indirect, 6}},
+		{0x11, {Opname::ora, Addressing::zero_page_indirect_y_indexed, 5}},
+
+		/* Arithmetic */
+		// adc
+		{0x69, {Opname::adc, Addressing::immediate, 2}},
+		{0x6d, {Opname::adc, Addressing::absolute, 4}},
+		{0x7d, {Opname::adc, Addressing::x_indexed_absolute, 4}},
+		{0x79, {Opname::adc, Addressing::y_indexed_absolute, 4}},
+		{0x65, {Opname::adc, Addressing::zero_page, 3}},
+		{0x75, {Opname::adc, Addressing::x_indexed_zero_page, 4}},
+		{0x61, {Opname::adc, Addressing::x_indexed_zero_page_indirect, 6}},
+		{0x71, {Opname::adc, Addressing::zero_page_indirect_y_indexed, 5}},
+		// sbc
+		{0xe9, {Opname::sbc, Addressing::immediate, 2}},
+		{0xed, {Opname::sbc, Addressing::absolute, 4}},
+		{0xfd, {Opname::sbc, Addressing::x_indexed_absolute, 4}},
+		{0xf9, {Opname::sbc, Addressing::y_indexed_absolute, 4}},
+		{0xe5, {Opname::sbc, Addressing::zero_page, 3}},
+		{0xf5, {Opname::sbc, Addressing::x_indexed_zero_page, 4}},
+		{0xe1, {Opname::sbc, Addressing::x_indexed_zero_page_indirect, 6}},
+		{0xf1, {Opname::sbc, Addressing::zero_page_indirect_y_indexed, 5}},
+		// cmp
+		{0xc9, {Opname::cmp, Addressing::immediate, 2}},
+		{0xcd, {Opname::cmp, Addressing::absolute, 4}},
+		{0xdd, {Opname::cmp, Addressing::x_indexed_absolute, 4}},
+		{0xd9, {Opname::cmp, Addressing::y_indexed_absolute, 4}},
+		{0xc5, {Opname::cmp, Addressing::zero_page, 3}},
+		{0xd5, {Opname::cmp, Addressing::x_indexed_zero_page, 4}},
+		{0xc1, {Opname::cmp, Addressing::x_indexed_zero_page_indirect, 6}},
+		{0xd1, {Opname::cmp, Addressing::zero_page_indirect_y_indexed, 5}},
+
+		/* Control Flow */
+		// brk
+		{0x00, {Opname::brk, Addressing::none, 7}},
+		// jmp
+		{0x4c, {Opname::jmp, Addressing::absolute, 3}},
+		{0x6c, {Opname::jmp, Addressing::absolute_indirect, 5}},
+		// jsr
+		{0x20, {Opname::jsr, Addressing::absolute, 6}},
+		// rti
+		{0x40, {Opname::rti, Addressing::none, 6}},
+		// rts
+		{0x60, {Opname::rts, Addressing::none, 6}},
 	};
 
 private:
@@ -179,7 +330,7 @@ private:
 			bool IDF : 1;
 			bool DF : 1;
 			bool BF : 1;
-			bool EF : 1;
+			bool _P_UNUSED : 1;
 			bool VF : 1;
 			bool NF : 1;
 		};
@@ -187,7 +338,10 @@ private:
 	uint16_t PC;
 
 	// Storage
-	std::array<uint8_t, 0xff'ff> RAM, ROM;
+	std::array<uint8_t, 0x1'00'00> RAM, ROM;
+
+private:
+	std::string out_buffer;
 
 private:
 	void load(const std::array<uint8_t, 16>& dump)
@@ -329,7 +483,7 @@ private:
 
 		auto _branch_considered = [&](uint16_t operand) {
 			PC += operand;
-			cycles += 1 + uint8_t(page_cross);
+			cycles++;
 		};
 
 		enum _Flags : unsigned {
@@ -352,7 +506,7 @@ private:
 			return RAM[0x0100 + S];
 		};
 
-		uint8_t *ptemp;
+		uint8_t temp;
 		switch (opname)
 		{
 			using enum Opname;
@@ -366,7 +520,7 @@ private:
 		case cli: IDF = false; break;
 		case clv: VF = false; break;
 		case sec: CF = true; break;
-		case sed: DF = true; break;
+		case sed: DF = true; iassert(false, "Decimal mode unimplemented"); break;
 		case sei: IDF = true; break;
 
 		/* Control Flow: Branch */
@@ -397,7 +551,12 @@ private:
 
 		/* Stack */
 		case pha: _push(A); break;
-		case php: _push(P); break;
+		case php: {
+			auto prev_BF = BF;
+			BF = true;
+			_push(P);
+			BF = prev_BF;
+		} break;
 		case pla: A = _pop(); _update_flags(_F_N | _F_Z, A); break;
 		case plp: P = _pop(); break;
 
@@ -405,39 +564,131 @@ private:
 		case lda:
 			A = addr == Addressing::immediate ? operand : RAM[operand];
 			_update_flags(_F_N | _F_Z, A);
-			cycles += uint8_t(page_cross);
 			break;
 		case ldx:
 			X = addr == Addressing::immediate ? operand : RAM[operand];
 			_update_flags(_F_N | _F_Z, X);
-			cycles += uint8_t(page_cross);
 			break;
 		case ldy:
 			Y = addr == Addressing::immediate ? operand : RAM[operand];
 			_update_flags(_F_N | _F_Z, Y);
-			cycles += uint8_t(page_cross);
 			break;
 		case sta: RAM[operand] = A; break;
 		case stx: RAM[operand] = X; break;
 		case sty: RAM[operand] = Y; break;
 
+		/* Shift */
 		case asl:
-		case rol:
-			ptemp = addr == Addressing::none ? &A : &RAM[operand];
-			CF = *ptemp & (1 << 7);
-			*ptemp <<= 1;
-			if (opname == rol) *ptemp |= uint8_t(CF);
-			_update_flags(_F_N | _F_Z, *ptemp);
-			break;
+		case rol: {
+			uint8_t *poperand = addr == Addressing::none ? &A : &RAM[operand];
+			CF = *poperand & (1 << 7);
+			*poperand <<= 1;
+			if (opname == rol) *poperand |= uint8_t(CF);
+			_update_flags(_F_N | _F_Z, *poperand);
+		} break;
 		case lsr:
-		case ror:
-			ptemp = addr == Addressing::none ? &A : &RAM[operand];
-			CF = *ptemp & 1;
-			*ptemp >>= 1;
-			if (opname == ror) *ptemp |= uint8_t(CF) << 7;
-			_update_flags(_F_N | _F_Z, *ptemp);
-			break;
+		case ror: {
+			uint8_t *poperand = addr == Addressing::none ? &A : &RAM[operand];
+			CF = *poperand & 1;
+			*poperand >>= 1;
+			if (opname == ror) *poperand |= uint8_t(CF) << 7;
+			_update_flags(_F_N | _F_Z, *poperand);
+		} break;
+
+		/* Logic */
+		case andd: temp = addr == Addressing::immediate ? operand : RAM[operand]; A &= temp; _update_flags(_F_N | _F_Z, temp); break;
+		case bit: {
+			uint8_t test = A & RAM[operand];
+			VF = RAM[operand] & (1 << 6);
+			_update_flags(_F_N, RAM[operand]);
+			_update_flags(_F_Z, test);
+	  	} break;
+		case eor: temp = addr == Addressing::immediate ? operand : RAM[operand]; A ^= temp; _update_flags(_F_N | _F_Z, temp); break;
+		case ora: temp = addr == Addressing::immediate ? operand : RAM[operand]; A |= temp; _update_flags(_F_N | _F_Z, temp); break;
+
+		/* Arithmetic */
+		case adc: {
+			int16_t final_operand = addr == Addressing::immediate ? int8_t(operand) : int8_t(RAM[operand]);
+			uint16_t sum = uint16_t(int16_t(A)) + uint16_t(final_operand) + uint16_t(CF);
+
+			CF = sum > 0xff;
+			VF = (sum & 0x80) != (A & 0x80);
+			A = sum;
+			NF = A & (1 << 7);
+			ZF = A == 0;
+		} break;
+		case sbc: {
+			int16_t final_operand = addr == Addressing::immediate ? int8_t(operand) : int8_t(RAM[operand]);
+			uint16_t diff = uint16_t(int16_t(A)) - uint16_t(final_operand) - uint16_t(CF); // FIXME: Is this OK?
+			int16_t sdiff = diff;
+
+			VF = sdiff > 127 | sdiff < -127;
+			A = diff;
+			CF = !(A & (1 << 7));
+			NF = A & (1 << 7);
+			ZF = A == 0;
+		} break; 
+		case cmp: {
+			uint8_t final_operand = addr == Addressing::immediate ? operand : RAM[operand];
+			uint8_t test = A - final_operand;
+
+			// NOTE: Could be optimized
+			CF = A >= final_operand;
+			NF = test & (1 << 7);
+			ZF = test == 0;
+		} break;
+		case cpx: {
+			uint8_t final_operand = addr == Addressing::immediate ? operand : RAM[operand];
+			uint8_t test = X - final_operand;
+
+			// NOTE: Could be optimized
+			CF = X >= final_operand;
+			NF = test & (1 << 7);
+			ZF = test == 0;
+		} break;
+		case cpy: {
+			uint8_t final_operand = addr == Addressing::immediate ? operand : RAM[operand];
+			uint8_t test = Y - final_operand;
+
+			// NOTE: Could be optimized
+			CF = Y >= final_operand;
+			NF = test & (1 << 7);
+			ZF = test == 0;
+		} break;
+
+		/* Control Flow */
+		case brk: {
+			fetch(); // brk is a 2-byte opcode
+
+			_push(PC >> 8);
+			_push(PC & 0xff);
+
+			auto prev_BF = BF;
+			BF = true;
+			_push(P);
+			BF = prev_BF;
+
+			IDF = true;
+
+			PC = RAM[0xfffe] | RAM[0xffff] << 8;
+		} break;
+		case jmp: PC = operand; break;
+		case jsr: {
+			_push(PC >> 8);
+			_push(PC & 0xff);
+			PC = RAM[operand] | RAM[operand+1] << 8;
+		} break;
+		case rti: {
+			P = _pop(); BF = false;
+			PC = _pop() | _pop() << 8;
+		} break;
+		case rts: PC = _pop() | _pop() << 8; break;
 		}
+
+		cycles += uint8_t(page_cross);
+
+		const char *bold = "\033[1;32m", *reset = "\033[0m";
+		out_buffer += std::format("\n{}-> {} 0x{:x},{}{}\n", bold, opname_str[static_cast<int>(opname)], operand, operand, reset);
 
 		return cycles;
 	}
@@ -458,22 +709,30 @@ private:
 public:
 	PS11(int argc, char** argv)
 	{
-		if (argc > 1) {
-			if (!load(argv[1]))
-				std::println(stderr, "Couldn't load {}", argv[1]);
-		}
+		iassert(argc > 1, "No ROM provided");
+		iassert(load(argv[1]), "Couldn't load {}", argv[1]);
 	}
 
-	void init()
+	void print_info()
 	{
-	}
+		const char *bold = "\033[1;31m", *reset = "\033[0m";
 
+		const int _CF = CF, _ZF = ZF, _IDF = IDF, _DF = DF, _BF = BF, _VF = VF, _NF = NF;
+		out_buffer += '\n';
+		out_buffer += std::format("{}A:{} 0x{:X},{},{} {}X:{} 0x{:X},{},{} {}Y:{} 0x{:X},{},{}\n",
+			bold, reset, A, A, (int8_t)A,
+			bold, reset, X, X, (int8_t)X,
+			bold, reset, Y, Y, (int8_t)Y);
+		out_buffer += std::format("{}S:{} 0x{:0>2X} {}PC:{} 0x{:0>4X}\n", bold, reset, S, bold, reset, PC);
+		out_buffer += std::format("{}CF:{} {} {}ZF:{} {} {}IDF:{} {} {}DF:{} {} {}BF:{} {} {}VF:{} {} {}NF:{} {}\n",
+			bold, reset, _CF, bold, reset, _ZF, bold, reset, _IDF,
+			bold, reset, _DF, bold, reset, _BF, bold, reset, _VF, bold, reset, _NF);
+	};
+
+	void init() {}
 	void run()
 	{
-		auto _print_regs_flags = [&]() {
-		};
-
-		auto _load_new = [&]() {
+		[[maybe_unused]] auto _load_new = [&]() {
 			std::string filename;
 			std::print(stderr, "Dump to load? ");
 
@@ -484,7 +743,7 @@ public:
 			std::cin.clear();
 		};
 
-		auto _input = [&](char& c) -> bool {
+		[[maybe_unused]] auto _input = [&](char& c) -> bool {
 			do {
 				std::cin.get(c);
 			} while (c == ' ' or c == '\t');
@@ -496,28 +755,30 @@ public:
 			return true;
 		};
 
-		unsigned speed = 5;  // Hertz
-		std::chrono::nanoseconds sleep_for (uint64_t(1e9 / double(speed)));
+		float clock_rate = 10;
+		std::chrono::nanoseconds ns_per_tick (uint64_t(1e9 / clock_rate));
 
 		bool quit = false;
 		while (!quit)
 		{
-			if (false)
+			auto then = std::chrono::high_resolution_clock::now();
+			uint8_t cycles = 0;
 			{
+				cycles = step();
+				print_info();
 			}
-			else if (false)
-			{
-			}
-			else
-			{
-				auto then = std::chrono::high_resolution_clock::now();
-				std::println();
-				// advance();
-				_print_regs_flags();
-				auto now = std::chrono::high_resolution_clock::now();
+			auto now = std::chrono::high_resolution_clock::now();
 
-				std::this_thread::sleep_for(sleep_for - (now - then));
-			}
+			auto actual_duration = now - then;
+			auto ideal_duration = cycles * ns_per_tick;
+
+			std::print("{}", out_buffer);
+			out_buffer.clear();
+
+			// std::println("{:.3f}%", 100.0 * actual_duration.count() / double(ideal_duration.count()));
+
+			std::fflush(stdout);
+			std::this_thread::sleep_for(ideal_duration - actual_duration);
 		}
 	}
 };
