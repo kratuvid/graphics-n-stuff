@@ -12,6 +12,8 @@
 #include <unordered_map>
 #include <fstream>
 #include <algorithm>
+#include <variant>
+#include <regex>
 
 #include <fcntl.h>
 #include <linux/input-event-codes.h>

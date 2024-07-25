@@ -3,5 +3,5 @@ init:
 
 loop:
 	clc
-	adc #$8f
+	sbc #$2
 	jmp loop

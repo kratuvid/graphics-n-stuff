@@ -1,7 +1,67 @@
 #pragma once
 
-#include "pch.hpp"
 #include "utility.hpp"
+
+class Configuration
+{
+public:
+	using value_t = std::variant<std::string, long>;
+	using map_t = std::unordered_map<std::string, value_t>;
+
+private:
+	map_t store;
+
+public:
+	Configuration(std::string_view path)
+	{
+		std::ifstream file(path.data());
+		iassert(file.is_open(), "Cannot open configuration file {}", path);
+
+		const std::regex reg_empty(R"(\s*)"), reg_comment(R"(\s*;.*)"), reg_data(R"(\s*(.+?)\s*?=\s*(.+?)\s*)");
+		const std::regex reg_key(R"(([sl])\s*?:\s*(.+))");
+
+		std::string line;
+		while (std::getline(file, line))
+		{
+			std::smatch match;
+			if (std::regex_match(line, match, reg_empty))
+				continue;
+			else if (std::regex_match(line, match, reg_comment))
+				continue;
+			else if (std::regex_match(line, match, reg_data))
+			{
+				std::string only_key = match[1].str();
+				std::string value = match[2].str();
+				if (std::regex_match(only_key, match, reg_key))
+				{
+					char value_format = match[1].str()[0];
+					auto key = match[2].str();
+
+					switch (value_format)
+					{
+					case 's':
+						store[key] = value;
+						break;
+					case 'l':
+						char* str_end = nullptr;
+						long value_conv = strtol(value.c_str(), &str_end, 10);
+						iassert(str_end != nullptr, "String to long conversion failed at line '{}' in file {}", line, path);
+						store[key] = value_conv;
+						break;
+					}
+				}
+				else iassert(false, "Bad key format '{}' in file {}", line, path);
+			}
+			else iassert(false, "Invalid line '{}' in file {}", line, path);
+		}
+	}
+
+	template<typename T>
+	T const& get(const std::string& key) const
+	{
+		return std::get<T>(store.at(key));
+	}
+};
 
 class PS11
 {
@@ -304,6 +364,14 @@ private:
 		{0xd5, {Opname::cmp, Addressing::x_indexed_zero_page, 4}},
 		{0xc1, {Opname::cmp, Addressing::x_indexed_zero_page_indirect, 6}},
 		{0xd1, {Opname::cmp, Addressing::zero_page_indirect_y_indexed, 5}},
+		// cpx
+		{0xe0, {Opname::cpx, Addressing::immediate, 2}},
+		{0xec, {Opname::cpx, Addressing::absolute, 4}},
+		{0xe4, {Opname::cpx, Addressing::zero_page, 3}},
+		// cpy
+		{0xc0, {Opname::cpy, Addressing::immediate, 2}},
+		{0xcc, {Opname::cpy, Addressing::absolute, 4}},
+		{0xc4, {Opname::cpy, Addressing::zero_page, 3}},
 
 		/* Control Flow */
 		// brk
@@ -342,6 +410,8 @@ private:
 
 private:
 	std::string out_buffer;
+
+	Configuration conf {"src/ps11/6502.ini"};
 
 private:
 	void load(const std::array<uint8_t, 16>& dump)
@@ -459,7 +529,7 @@ private:
 
 		case relative:
 			// NOTE: Probably not properly implemented
-			operand = int16_t(fetch());
+			operand = int8_t(fetch());
 			{
 				temp[0] = PC + operand;
 				page_cross = (PC & 0xff'00) != (temp[0] & 0xff'00);
@@ -676,7 +746,7 @@ private:
 		case jsr: {
 			_push(PC >> 8);
 			_push(PC & 0xff);
-			PC = RAM[operand] | RAM[operand+1] << 8;
+			PC = operand;
 		} break;
 		case rti: {
 			P = _pop(); BF = false;
@@ -687,8 +757,17 @@ private:
 
 		cycles += uint8_t(page_cross);
 
-		const char *bold = "\033[1;32m", *reset = "\033[0m";
-		out_buffer += std::format("\n{}-> {} 0x{:x},{}{}\n", bold, opname_str[static_cast<int>(opname)], operand, operand, reset);
+		static bool suppress_instruction;
+		static bool is_si_pulled = false;
+		if (!is_si_pulled) {
+			suppress_instruction = conf.get<long>("suppress instruction");
+			is_si_pulled = true;
+		}
+
+		if (!suppress_instruction) {
+			const char *bold = "\033[1;32m", *reset = "\033[0m";
+			out_buffer += std::format("\n{}-> {} 0x{:x},{}{}\n", bold, opname_str[static_cast<int>(opname)], operand, operand, reset);
+		}
 
 		return cycles;
 	}
@@ -755,29 +834,32 @@ public:
 			return true;
 		};
 
-		float clock_rate = 10;
+		const float clock_rate = conf.get<long>("clock rate");
 		std::chrono::nanoseconds ns_per_tick (uint64_t(1e9 / clock_rate));
+
+		const bool suppress_info = conf.get<long>("suppress info");
 
 		bool quit = false;
 		while (!quit)
 		{
 			auto then = std::chrono::high_resolution_clock::now();
+
 			uint8_t cycles = 0;
 			{
 				cycles = step();
-				print_info();
+				if (!suppress_info)
+					print_info();
 			}
+
+			std::print("{}", out_buffer);
+			out_buffer.clear();
+			std::fflush(stdout);
+
 			auto now = std::chrono::high_resolution_clock::now();
 
 			auto actual_duration = now - then;
 			auto ideal_duration = cycles * ns_per_tick;
-
-			std::print("{}", out_buffer);
-			out_buffer.clear();
-
 			// std::println("{:.3f}%", 100.0 * actual_duration.count() / double(ideal_duration.count()));
-
-			std::fflush(stdout);
 			std::this_thread::sleep_for(ideal_duration - actual_duration);
 		}
 	}

@@ -1,0 +1,13 @@
+ldx #3
+first:
+	dex
+	bne first
+
+ldx #0
+second:
+	inx
+	cpx #3
+	bcc second
+
+end:
+	jmp end

@@ -1,0 +1,17 @@
+lda #$c0
+sta $20
+
+lda #$00
+sta $21
+
+lda $20
+clc
+adc #$50
+sta $20
+
+lda $21
+adc #0
+sta $21
+
+end:
+	jmp end
