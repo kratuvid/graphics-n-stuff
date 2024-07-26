@@ -1,0 +1,20 @@
+ldx #1
+ldy #1
+
+loop:
+	txa
+	sty $00
+	clc
+	adc $00
+	sta $00
+
+	tya
+	tax
+
+	lda $00
+	tay
+
+	cmp #200
+	bcc loop
+
+inc $f000

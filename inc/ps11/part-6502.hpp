@@ -24,9 +24,7 @@ public:
 		while (std::getline(file, line))
 		{
 			std::smatch match;
-			if (std::regex_match(line, match, reg_empty))
-				continue;
-			else if (std::regex_match(line, match, reg_comment))
+			if (std::regex_match(line, match, reg_empty) or std::regex_match(line, match, reg_comment))
 				continue;
 			else if (std::regex_match(line, match, reg_data))
 			{
@@ -60,6 +58,16 @@ public:
 	T const& get(const std::string& key) const
 	{
 		return std::get<T>(store.at(key));
+	}
+
+	template<typename T>
+	T const& get_or_else(const std::string& key, T const& otherwise) const
+	{
+		auto found = store.find(key);
+		if (found == store.end())
+			return otherwise;
+		else
+			return std::get<T>(found->second);
 	}
 };
 
@@ -409,9 +417,9 @@ private:
 	std::array<uint8_t, 0x1'00'00> RAM, ROM;
 
 private:
-	std::string out_buffer;
-
 	Configuration conf {"src/ps11/6502.ini"};
+
+	std::string out_buffer;
 
 private:
 	void load(const std::array<uint8_t, 16>& dump)
@@ -545,6 +553,8 @@ private:
 		auto search = opcode_table.find(opcode);
 		iassert(search != opcode_table.end(), "Unimplemented instruction {:#x} at PC {:#x}", opcode, PC-1);
 		const auto [opname, addr, ideal_cycles] = search->second;
+
+		const uint16_t orig_PC = PC-1;
 
 		bool page_cross;
 		const uint16_t operand = fetch_operand(addr, page_cross);
@@ -757,16 +767,24 @@ private:
 
 		cycles += uint8_t(page_cross);
 
-		static bool suppress_instruction;
-		static bool is_si_pulled = false;
-		if (!is_si_pulled) {
-			suppress_instruction = conf.get<long>("suppress instruction");
-			is_si_pulled = true;
+		static bool suppress_ins, extra_newline_ins;
+		static bool is_conf_pulled = false;
+		if (!is_conf_pulled) {
+			suppress_ins = conf.get_or_else<long>("suppress instruction", false);
+			extra_newline_ins = conf.get_or_else<long>("extra newline instruction", true);
+			is_conf_pulled = true;
 		}
 
-		if (!suppress_instruction) {
+		if (!suppress_ins) {
 			const char *bold = "\033[1;32m", *reset = "\033[0m";
-			out_buffer += std::format("\n{}-> {} 0x{:x},{}{}\n", bold, opname_str[static_cast<int>(opname)], operand, operand, reset);
+
+			if (extra_newline_ins)
+				out_buffer += '\n';
+
+			if (addr == Addressing::none)
+				out_buffer += std::format("{}{:0>4x}> {}\n", bold, orig_PC, opname_str[static_cast<int>(opname)]);
+			else
+				out_buffer += std::format("{}{:0>4x}> {} 0x{:x},{},{}{}\n", bold, orig_PC, opname_str[static_cast<int>(opname)], operand, operand, (int16_t)operand, reset);
 		}
 
 		return cycles;
@@ -797,7 +815,6 @@ public:
 		const char *bold = "\033[1;31m", *reset = "\033[0m";
 
 		const int _CF = CF, _ZF = ZF, _IDF = IDF, _DF = DF, _BF = BF, _VF = VF, _NF = NF;
-		out_buffer += '\n';
 		out_buffer += std::format("{}A:{} 0x{:X},{},{} {}X:{} 0x{:X},{},{} {}Y:{} 0x{:X},{},{}\n",
 			bold, reset, A, A, (int8_t)A,
 			bold, reset, X, X, (int8_t)X,
@@ -834,10 +851,11 @@ public:
 			return true;
 		};
 
-		const float clock_rate = conf.get<long>("clock rate");
-		std::chrono::nanoseconds ns_per_tick (uint64_t(1e9 / clock_rate));
+		const float clock_rate = conf.get_or_else<long>("clock rate", 10);
+		const bool suppress_info = conf.get_or_else<long>("suppress info", false),
+			extra_newline_info = conf.get_or_else<long>("extra newline info", true);
 
-		const bool suppress_info = conf.get<long>("suppress info");
+		std::chrono::nanoseconds ns_per_tick (uint64_t(1e9 / clock_rate));
 
 		bool quit = false;
 		while (!quit)
@@ -847,8 +865,11 @@ public:
 			uint8_t cycles = 0;
 			{
 				cycles = step();
-				if (!suppress_info)
+				if (!suppress_info) {
+					if (extra_newline_info)
+						out_buffer += '\n';
 					print_info();
+				}
 			}
 
 			std::print("{}", out_buffer);
@@ -861,6 +882,8 @@ public:
 			auto ideal_duration = cycles * ns_per_tick;
 			// std::println("{:.3f}%", 100.0 * actual_duration.count() / double(ideal_duration.count()));
 			std::this_thread::sleep_for(ideal_duration - actual_duration);
+
+			quit = RAM[0xf000];
 		}
 	}
 };

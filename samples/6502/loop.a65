@@ -3,11 +3,10 @@ first:
 	dex
 	bne first
 
-ldx #0
-second:
-	inx
-	cpx #3
-	bcc second
+ldy #0
+third:
+	iny
+	cpy #10
+	bcc third
 
-end:
-	jmp end
+inc $f000
